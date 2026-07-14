@@ -2,6 +2,7 @@ import re
 import os
 import pandas as pd
 import streamlit as st
+from streamlit_option_menu import option_menu
 from gtts import gTTS
 
 import db
@@ -9,18 +10,22 @@ import ai
 
 st.set_page_config(page_title="KOS Enterprise", layout="wide")
 
-if "user" not in st.session_state:
-    st.session_state.user = None
-if "auth_view" not in st.session_state:
-    st.session_state.auth_view = "login"
-if "force_pw_change" not in st.session_state:
-    st.session_state.force_pw_change = False
+for key, default in [
+    ("user", None),
+    ("auth_view", "login"),
+    ("force_pw_change", False),
+    ("current_session_id", None),
+    ("fm_current_path", "/"),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 
 def logout():
     st.session_state.user = None
     st.session_state.auth_view = "login"
     st.session_state.force_pw_change = False
+    st.session_state.current_session_id = None
     st.rerun()
 
 
@@ -34,8 +39,7 @@ def landing_page():
     with col2:
         with st.container(border=True):
             st.markdown(
-                "<h2 style='text-align: center;'>KOS</h2>",
-                unsafe_allow_html=True,
+                "<h2 style='text-align: center;'>KOS</h2>", unsafe_allow_html=True
             )
             st.markdown(
                 "<p style='text-align: center; color: gray;'>Satu sistem terpusat untuk seluruh kecerdasan perusahaan Anda.</p>",
@@ -131,17 +135,192 @@ def force_password_change():
 
 
 # ==========================================
-# DASHBOARD ADMIN
+# NAVIGASI (sidebar ikon + akun)
 # ==========================================
-def admin_sidebar():
-    st.sidebar.header(f"{st.session_state.user.get('company_name', 'Perusahaan')}")
-    st.sidebar.write(f"Admin: {st.session_state.user['email']}")
-    st.sidebar.button("Logout", on_click=logout)
-    st.sidebar.divider()
-    return st.sidebar.radio(
-        "Navigasi",
-        ["Manajemen Karyawan", "Universal Uploader", "File Manager & KOS AI"],
-    )
+def account_popover():
+    user = st.session_state.user
+    with st.popover(f"👤 {user['email']}", use_container_width=True):
+        st.write(f"**{user['email']}**")
+        st.caption(user.get("role", ""))
+        st.divider()
+        st.button("Logout", on_click=logout, use_container_width=True)
+
+
+def sidebar_nav(options: list, icons: list):
+    with st.sidebar:
+        st.markdown(f"### {st.session_state.user.get('company_name') or 'Perusahaan'}")
+        st.divider()
+        selected = option_menu(
+            menu_title=None,
+            options=options,
+            icons=icons,
+            default_index=0,
+            styles={
+                "container": {"padding": "0", "background-color": "transparent"},
+                "icon": {"font-size": "16px"},
+                "nav-link": {
+                    "font-size": "14px",
+                    "text-align": "left",
+                    "margin": "2px",
+                },
+                "nav-link-selected": {"background-color": "#FF4B4B"},
+            },
+        )
+        st.divider()
+        account_popover()
+    return selected
+
+
+# ==========================================
+# CHAT KOS (ala Claude: riwayat + delete/rename)
+# ==========================================
+def chat_page():
+    user = st.session_state.user
+    col_hist, col_chat = st.columns([1, 3])
+
+    with col_hist:
+        st.markdown("#### Riwayat")
+        if st.button("+ Chat baru", use_container_width=True):
+            st.session_state.current_session_id = None
+            st.rerun()
+
+        for s in db.list_chat_sessions(user["email"]):
+            active = s["id"] == st.session_state.current_session_id
+            label = ("🟢 " if active else "") + (s["title"] or "Percakapan baru")
+            c1, c2 = st.columns([4, 1])
+            with c1:
+                if st.button(label, key=f"sess_{s['id']}", use_container_width=True):
+                    st.session_state.current_session_id = s["id"]
+                    st.rerun()
+            with c2:
+                with st.popover("⋮"):
+                    new_title = st.text_input(
+                        "Ganti nama", value=s["title"], key=f"rename_{s['id']}"
+                    )
+                    if st.button(
+                        "Simpan", key=f"save_{s['id']}", use_container_width=True
+                    ):
+                        db.rename_chat_session(s["id"], new_title)
+                        st.rerun()
+                    if st.button(
+                        "🗑️ Hapus", key=f"del_{s['id']}", use_container_width=True
+                    ):
+                        db.delete_chat_session(s["id"])
+                        if st.session_state.current_session_id == s["id"]:
+                            st.session_state.current_session_id = None
+                        st.rerun()
+
+    with col_chat:
+        st.markdown(f"#### Chat KOS · Folder akses: `{user['folder_access']}`")
+
+        if st.session_state.current_session_id:
+            for m in db.get_chat_messages(st.session_state.current_session_id):
+                with st.chat_message(m["role"]):
+                    st.write(m["content"])
+
+        question = st.chat_input(
+            "Tanyakan sesuatu seputar operasional, SOP, atau resep..."
+        )
+
+        if question:
+            if not st.session_state.current_session_id:
+                st.session_state.current_session_id = db.create_chat_session(
+                    user["email"], user["company_id"]
+                )
+                db.rename_chat_session(
+                    st.session_state.current_session_id, question[:40]
+                )
+
+            db.add_chat_message(st.session_state.current_session_id, "user", question)
+            with st.chat_message("user"):
+                st.write(question)
+
+            with st.chat_message("assistant"):
+                with st.spinner("KOS sedang mencari di database..."):
+                    q_emb = ai.embed_text(question)
+                    docs = db.search_documents(
+                        q_emb,
+                        company_id=user["company_id"],
+                        match_count=3,
+                        folder_prefix=user["folder_access"],
+                    )
+                    answer = (
+                        ai.generate_answer(question, docs)
+                        if docs
+                        else "Tidak ada dokumen referensi yang ditemukan di folder Anda."
+                    )
+                st.write(answer)
+                if docs:
+                    if st.button("🔊 Dengarkan", key=f"tts_{question[:20]}"):
+                        tts = gTTS(text=answer, lang="id")
+                        tts.save("response.mp3")
+                        st.audio("response.mp3")
+
+            db.add_chat_message(
+                st.session_state.current_session_id, "assistant", answer
+            )
+            st.rerun()
+
+
+# ==========================================
+# FILE MANAGER (breadcrumb ala Drive)
+# ==========================================
+def file_manager_page():
+    company_id = st.session_state.user["company_id"]
+    current = st.session_state.fm_current_path
+
+    parts = [p for p in current.strip("/").split("/") if p]
+    crumb_cols = st.columns(len(parts) + 1)
+    with crumb_cols[0]:
+        if st.button("🏠 Root", key="crumb_root"):
+            st.session_state.fm_current_path = "/"
+            st.rerun()
+    accum = "/"
+    for i, part in enumerate(parts):
+        accum += part + "/"
+        with crumb_cols[i + 1]:
+            if st.button(part, key=f"crumb_{i}"):
+                st.session_state.fm_current_path = accum
+                st.rerun()
+
+    st.divider()
+
+    if st.session_state.user["role"] == "Admin":
+        with st.popover("+ Folder baru"):
+            new_name = st.text_input("Nama folder", key="new_folder_name")
+            if st.button("Buat", key="create_folder_btn"):
+                if new_name.strip():
+                    db.create_folder(company_id, current + new_name.strip() + "/")
+                    st.rerun()
+        st.write("")
+
+    children = db.list_child_folders(company_id, current)
+    docs = db.list_documents_in_folder(company_id, current)
+
+    if not children and not docs:
+        st.caption("Folder ini masih kosong.")
+
+    if children:
+        st.caption("Folder")
+        cols = st.columns(4)
+        for i, child in enumerate(children):
+            name = child.rstrip("/").split("/")[-1]
+            with cols[i % 4]:
+                if st.button(
+                    f"📁 {name}", key=f"folder_{child}", use_container_width=True
+                ):
+                    st.session_state.fm_current_path = child
+                    st.rerun()
+
+    if docs:
+        st.caption("Dokumen")
+        for d in docs:
+            icon = (
+                "🎥"
+                if d.get("metadata", {}).get("tipe_file") == "Multimodal Transkrip"
+                else "📄"
+            )
+            st.write(f"{icon} {d['title']}")
 
 
 def admin_employee_management():
@@ -207,7 +386,6 @@ def universal_uploader():
         for file in uploaded_files:
             ext = file.name.split(".")[-1].lower()
             with st.spinner(f"Memproses {file.name}..."):
-
                 if ext == "csv":
                     df = pd.read_csv(file)
                     for index, row in df.iterrows():
@@ -248,48 +426,10 @@ def universal_uploader():
                     finally:
                         if os.path.exists(temp_path):
                             os.remove(temp_path)
-
                 else:
                     st.warning(
                         f"Format {ext} belum didukung secara penuh di prototipe ini."
                     )
-
-
-# ==========================================
-# KOS CHAT (UNTUK SEMUA ROLE)
-# ==========================================
-def kos_workspace():
-    user = st.session_state.user
-    st.header(f"Chat KOS (Folder Akses: {user['folder_access']})")
-
-    question = st.text_input("Tanyakan sesuatu seputar operasional, SOP, atau resep...")
-
-    if st.button("Tanya KOS", type="primary") and question:
-        with st.spinner("KOS sedang mencari di database..."):
-            query_embedding = ai.embed_text(question)
-            docs = db.search_documents(
-                query_embedding,
-                company_id=user["company_id"],
-                match_count=3,
-                folder_prefix=user["folder_access"],
-            )
-
-            if not docs:
-                st.warning("Tidak ada dokumen referensi yang ditemukan di folder Anda.")
-            else:
-                answer = ai.generate_answer(question, docs)
-                st.markdown("### Jawaban AI")
-                st.write(answer)
-
-                tts = gTTS(text=answer, lang="id")
-                tts.save("response.mp3")
-                st.audio("response.mp3")
-
-                with st.expander("Lihat Dokumen Referensi"):
-                    for d in docs:
-                        st.info(
-                            f"**{d['title']}** (Similarity: {d['similarity']:.2f})\n\n{d['content'][:200]}..."
-                        )
 
 
 # ==========================================
@@ -303,17 +443,22 @@ else:
     role = st.session_state.user["role"]
 
     if role == "Admin":
-        menu = admin_sidebar()
-        if menu == "Manajemen Karyawan":
-            admin_employee_management()
-        elif menu == "Universal Uploader":
+        selected = sidebar_nav(
+            ["Chat KOS", "File Manager", "Upload Dokumen", "Karyawan"],
+            ["chat-dots", "folder", "cloud-upload", "people"],
+        )
+        if selected == "Chat KOS":
+            chat_page()
+        elif selected == "File Manager":
+            file_manager_page()
+        elif selected == "Upload Dokumen":
             universal_uploader()
         else:
-            kos_workspace()
+            admin_employee_management()
 
-    elif role == "Karyawan":
-        st.sidebar.header("KOS Workspace")
-        st.sidebar.write(f"Email: {st.session_state.user['email']}")
-        st.sidebar.write(f"Hak Akses: **{st.session_state.user['folder_access']}**")
-        st.sidebar.button("Logout", on_click=logout)
-        kos_workspace()
+    else:
+        selected = sidebar_nav(["Chat KOS", "File Manager"], ["chat-dots", "folder"])
+        if selected == "Chat KOS":
+            chat_page()
+        else:
+            file_manager_page()

@@ -63,9 +63,16 @@ def register_company(company_name: str, admin_email: str, password: str) -> str:
 def get_user(email: str):
     client = get_client()
     response = (
-        client.table("users").select("*").eq("email", email.strip().lower()).execute()
+        client.table("users")
+        .select("*, companies(name)")
+        .eq("email", email.strip().lower())
+        .execute()
     )
-    return response.data[0] if response.data else None
+    if not response.data:
+        return None
+    row = response.data[0]
+    row["company_name"] = (row.get("companies") or {}).get("name")
+    return row
 
 
 def update_password(email: str, new_password: str):
@@ -171,3 +178,107 @@ def search_documents(
         },
     ).execute()
     return response.data
+
+
+# ---------- FILE MANAGER ----------
+def create_folder(company_id: str, path: str):
+    client = get_client()
+    path = normalize_folder(path)
+    client.table("folders").upsert(
+        {"company_id": company_id, "path": path}, on_conflict="company_id,path"
+    ).execute()
+
+
+def list_child_folders(company_id: str, parent_path: str) -> list:
+    parent_path = normalize_folder(parent_path)
+    client = get_client()
+    folders = (
+        client.table("folders").select("path").eq("company_id", company_id).execute()
+    )
+    docs = (
+        client.table("documents")
+        .select("folder_path")
+        .eq("company_id", company_id)
+        .execute()
+    )
+
+    all_paths = {r["path"] for r in folders.data}
+    all_paths |= {r["folder_path"] for r in docs.data if r.get("folder_path")}
+
+    children = set()
+    for path in all_paths:
+        if path.startswith(parent_path) and path != parent_path:
+            first_segment = path[len(parent_path) :].split("/")[0]
+            if first_segment:
+                children.add(parent_path + first_segment + "/")
+    return sorted(children)
+
+
+def list_documents_in_folder(company_id: str, folder_path: str):
+    client = get_client()
+    r = (
+        client.table("documents")
+        .select("id, title, metadata, created_at")
+        .eq("company_id", company_id)
+        .eq("folder_path", normalize_folder(folder_path))
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return r.data
+
+
+# ---------- CHAT HISTORY ----------
+def create_chat_session(user_email: str, company_id: str) -> str:
+    client = get_client()
+    r = (
+        client.table("chat_sessions")
+        .insert({"user_email": user_email, "company_id": company_id})
+        .execute()
+    )
+    return r.data[0]["id"]
+
+
+def list_chat_sessions(user_email: str):
+    client = get_client()
+    r = (
+        client.table("chat_sessions")
+        .select("*")
+        .eq("user_email", user_email)
+        .order("updated_at", desc=True)
+        .execute()
+    )
+    return r.data
+
+
+def get_chat_messages(session_id: str):
+    client = get_client()
+    r = (
+        client.table("chat_messages")
+        .select("*")
+        .eq("session_id", session_id)
+        .order("created_at")
+        .execute()
+    )
+    return r.data
+
+
+def add_chat_message(session_id: str, role: str, content: str):
+    client = get_client()
+    client.table("chat_messages").insert(
+        {"session_id": session_id, "role": role, "content": content}
+    ).execute()
+    client.table("chat_sessions").update({"updated_at": "now()"}).eq(
+        "id", session_id
+    ).execute()
+
+
+def rename_chat_session(session_id: str, new_title: str):
+    client = get_client()
+    client.table("chat_sessions").update({"title": new_title}).eq(
+        "id", session_id
+    ).execute()
+
+
+def delete_chat_session(session_id: str):
+    client = get_client()
+    client.table("chat_sessions").delete().eq("id", session_id).execute()

@@ -52,12 +52,6 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 7. Suntikkan akun Super Admin default (agar kamu tidak terkunci dari sistem)
--- Password akan diurus di Streamlit menggunakan form login sederhana
-INSERT INTO users (email, role, folder_access) 
-VALUES ('admin@kos.com', 'Admin', '/')
-ON CONFLICT (email) DO NOTHING;
-
 create table if not exists companies (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -104,3 +98,31 @@ begin
   values (p_admin_email, p_password_hash, 'Admin', '/', new_company_id, p_company_name);
   return new_company_id;
 end; $$;
+
+create table if not exists chat_sessions (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid references companies(id),
+  user_email text not null,
+  title text default 'Percakapan baru',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists chat_messages (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid references chat_sessions(id) on delete cascade,
+  role text check (role in ('user','assistant')),
+  content text not null,
+  created_at timestamptz default now()
+);
+
+create index if not exists chat_sessions_user_idx on chat_sessions(user_email);
+create index if not exists chat_messages_session_idx on chat_messages(session_id);
+
+-- untuk File Manager: supaya admin bisa bikin folder kosong tanpa upload file dulu
+create table if not exists folders (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid references companies(id),
+  path text not null,
+  unique (company_id, path)
+);

@@ -4,3 +4,4 @@ google-generativeai
 gTTS
 pandas
 bcrypt
+streamlit-option-menu

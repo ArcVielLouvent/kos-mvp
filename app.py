@@ -26,7 +26,6 @@ def logout():
     st.session_state.auth_view = "login"
     st.session_state.force_pw_change = False
     st.session_state.current_session_id = None
-    st.rerun()
 
 
 # ==========================================
@@ -39,7 +38,8 @@ def landing_page():
     with col2:
         with st.container(border=True):
             st.markdown(
-                "<h2 style='text-align: center;'>KOS</h2>", unsafe_allow_html=True
+                "<h2 style='text-align: center;'>KOS Enterprise</h2>",
+                unsafe_allow_html=True,
             )
             st.markdown(
                 "<p style='text-align: center; color: gray;'>Satu sistem terpusat untuk seluruh kecerdasan perusahaan Anda.</p>",
@@ -62,6 +62,10 @@ def landing_page():
                             st.session_state.force_pw_change = user_data.get(
                                 "must_change_password", False
                             )
+                            # Reset folder path ke akses awal saat login
+                            st.session_state.fm_current_path = user_data[
+                                "folder_access"
+                            ]
                             st.rerun()
                         else:
                             st.error("Email atau Password salah.")
@@ -135,11 +139,11 @@ def force_password_change():
 
 
 # ==========================================
-# NAVIGASI (sidebar ikon + akun)
+# NAVIGASI
 # ==========================================
 def account_popover():
     user = st.session_state.user
-    with st.popover(f"👤 {user['email']}", use_container_width=True):
+    with st.popover(f"User: {user['email']}", use_container_width=True):
         st.write(f"**{user['email']}**")
         st.caption(user.get("role", ""))
         st.divider()
@@ -163,7 +167,7 @@ def sidebar_nav(options: list, icons: list):
                     "text-align": "left",
                     "margin": "2px",
                 },
-                "nav-link-selected": {"background-color": "#FF4B4B"},
+                "nav-link-selected": {"background-color": "#4A4A4A"},
             },
         )
         st.divider()
@@ -172,7 +176,7 @@ def sidebar_nav(options: list, icons: list):
 
 
 # ==========================================
-# CHAT KOS (ala Claude: riwayat + delete/rename)
+# CHAT KOS
 # ==========================================
 def chat_page():
     user = st.session_state.user
@@ -180,20 +184,20 @@ def chat_page():
 
     with col_hist:
         st.markdown("#### Riwayat")
-        if st.button("+ Chat baru", use_container_width=True):
+        if st.button("Chat Baru", use_container_width=True):
             st.session_state.current_session_id = None
             st.rerun()
 
         for s in db.list_chat_sessions(user["email"]):
             active = s["id"] == st.session_state.current_session_id
-            label = ("🟢 " if active else "") + (s["title"] or "Percakapan baru")
+            label = ("[Aktif] " if active else "") + (s["title"] or "Percakapan baru")
             c1, c2 = st.columns([4, 1])
             with c1:
                 if st.button(label, key=f"sess_{s['id']}", use_container_width=True):
                     st.session_state.current_session_id = s["id"]
                     st.rerun()
             with c2:
-                with st.popover("⋮"):
+                with st.popover("Opsi"):
                     new_title = st.text_input(
                         "Ganti nama", value=s["title"], key=f"rename_{s['id']}"
                     )
@@ -203,7 +207,7 @@ def chat_page():
                         db.rename_chat_session(s["id"], new_title)
                         st.rerun()
                     if st.button(
-                        "🗑️ Hapus", key=f"del_{s['id']}", use_container_width=True
+                        "Hapus", key=f"del_{s['id']}", use_container_width=True
                     ):
                         db.delete_chat_session(s["id"])
                         if st.session_state.current_session_id == s["id"]:
@@ -218,9 +222,7 @@ def chat_page():
                 with st.chat_message(m["role"]):
                     st.write(m["content"])
 
-        question = st.chat_input(
-            "Tanyakan sesuatu seputar operasional, SOP, atau resep..."
-        )
+        question = st.chat_input("Ketik pertanyaan seputar operasional perusahaan...")
 
         if question:
             if not st.session_state.current_session_id:
@@ -236,7 +238,7 @@ def chat_page():
                 st.write(question)
 
             with st.chat_message("assistant"):
-                with st.spinner("KOS sedang mencari di database..."):
+                with st.spinner("Mencari referensi..."):
                     q_emb = ai.embed_text(question)
                     docs = db.search_documents(
                         q_emb,
@@ -247,11 +249,12 @@ def chat_page():
                     answer = (
                         ai.generate_answer(question, docs)
                         if docs
-                        else "Tidak ada dokumen referensi yang ditemukan di folder Anda."
+                        else "Tidak ada referensi dokumen ditemukan di direktori Anda."
                     )
+
                 st.write(answer)
                 if docs:
-                    if st.button("🔊 Dengarkan", key=f"tts_{question[:20]}"):
+                    if st.button("Dengarkan Audio", key=f"tts_{question[:20]}"):
                         tts = gTTS(text=answer, lang="id")
                         tts.save("response.mp3")
                         st.audio("response.mp3")
@@ -263,30 +266,47 @@ def chat_page():
 
 
 # ==========================================
-# FILE MANAGER (breadcrumb ala Drive)
+# FILE MANAGER WINDOWS/LINUX STYLE
 # ==========================================
 def file_manager_page():
     company_id = st.session_state.user["company_id"]
+    user_role = st.session_state.user["role"]
+    base_path = (
+        st.session_state.user["folder_access"] if user_role == "Karyawan" else "/"
+    )
+
+    # Keamanan Mutlak: Cegat karyawan mengakses di luar base_path
+    if not st.session_state.fm_current_path.startswith(base_path):
+        st.session_state.fm_current_path = base_path
+
     current = st.session_state.fm_current_path
 
+    st.markdown("### Direktori Penyimpanan")
+
+    # Breadcrumbs Render
     parts = [p for p in current.strip("/").split("/") if p]
     crumb_cols = st.columns(len(parts) + 1)
+
     with crumb_cols[0]:
-        if st.button("🏠 Root", key="crumb_root"):
-            st.session_state.fm_current_path = "/"
+        if st.button("Beranda", key="crumb_root"):
+            st.session_state.fm_current_path = base_path
             st.rerun()
+
     accum = "/"
     for i, part in enumerate(parts):
         accum += part + "/"
         with crumb_cols[i + 1]:
-            if st.button(part, key=f"crumb_{i}"):
+            # Karyawan tidak bisa klik path yang ada di bawah izin mereka
+            disabled = (user_role == "Karyawan") and (not accum.startswith(base_path))
+            if st.button(part, key=f"crumb_{i}", disabled=disabled):
                 st.session_state.fm_current_path = accum
                 st.rerun()
 
     st.divider()
 
-    if st.session_state.user["role"] == "Admin":
-        with st.popover("+ Folder baru"):
+    # Toolbar Aksi (Hanya Admin)
+    if user_role == "Admin":
+        with st.popover("Buat Folder Baru"):
             new_name = st.text_input("Nama folder", key="new_folder_name")
             if st.button("Buat", key="create_folder_btn"):
                 if new_name.strip():
@@ -297,48 +317,77 @@ def file_manager_page():
     children = db.list_child_folders(company_id, current)
     docs = db.list_documents_in_folder(company_id, current)
 
-    if not children and not docs:
-        st.caption("Folder ini masih kosong.")
+    # UI Tabel ala File Manager OS Asli
+    col_name, col_type, col_action = st.columns([5, 2, 3])
+    col_name.write("**Nama**")
+    col_type.write("**Tipe**")
+    col_action.write("**Aksi**")
+    st.divider()
 
-    if children:
-        st.caption("Folder")
-        cols = st.columns(4)
-        for i, child in enumerate(children):
-            name = child.rstrip("/").split("/")[-1]
-            with cols[i % 4]:
-                if st.button(
-                    f"📁 {name}", key=f"folder_{child}", use_container_width=True
-                ):
-                    st.session_state.fm_current_path = child
+    if not children and not docs:
+        st.caption("Folder kosong.")
+
+    # Render Folders
+    for child in children:
+        name = child.rstrip("/").split("/")[-1]
+        c1, c2, c3 = st.columns([5, 2, 3])
+        with c1:
+            if st.button(f"[Folder] {name}", key=f"nav_{child}"):
+                st.session_state.fm_current_path = child
+                st.rerun()
+        with c2:
+            st.write("Direktori")
+        with c3:
+            if user_role == "Admin":
+                if st.button("Hapus", key=f"del_f_{child}"):
+                    db.delete_folder_and_contents(company_id, child)
                     st.rerun()
 
-    if docs:
-        st.caption("Dokumen")
-        for d in docs:
-            icon = (
-                "🎥"
-                if d.get("metadata", {}).get("tipe_file") == "Multimodal Transkrip"
-                else "📄"
-            )
-            st.write(f"{icon} {d['title']}")
+    # Render Documents
+    for d in docs:
+        c1, c2, c3 = st.columns([5, 2, 3])
+        with c1:
+            st.write(d["title"])
+        with c2:
+            tipe = d.get("metadata", {}).get("tipe_file", "Teks")
+            st.write(tipe)
+        with c3:
+            if user_role == "Admin":
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    with st.popover("Pindah"):
+                        new_f = st.text_input(
+                            "Folder tujuan (harus diakhiri /)",
+                            value=current,
+                            key=f"mov_in_{d['id']}",
+                        )
+                        if st.button("Simpan", key=f"mov_btn_{d['id']}"):
+                            db.move_document(d["id"], new_f, company_id)
+                            st.rerun()
+                with col_b:
+                    if st.button("Hapus", key=f"del_d_{d['id']}"):
+                        db.delete_document(d["id"])
+                        st.rerun()
 
 
 def admin_employee_management():
     company_id = st.session_state.user["company_id"]
-    st.header("Manajemen Karyawan (Paste & Pick)")
-    st.write("Masukkan email karyawan dan tentukan direktori akses mereka.")
+    st.header("Manajemen Karyawan")
+    st.write(
+        "Masukkan email karyawan dan tentukan direktori akses mereka. Folder akan terbuat secara otomatis jika belum ada."
+    )
 
     col1, col2 = st.columns(2)
     with col1:
         emails_text = st.text_area(
-            "Daftar Email (pisahkan dengan koma atau baris baru)",
+            "Daftar Email (pisahkan dengan koma/baris baru)",
             height=150,
             placeholder="karyawan1@kos.com\nkaryawan2@kos.com",
         )
     with col2:
         existing_folders = db.get_unique_folders(company_id)
-        selected_folder = st.selectbox("Pilih Folder Akses", existing_folders)
-        new_folder = st.text_input("Atau ketik folder baru (contoh: /Dapur/SOP/ )")
+        selected_folder = st.selectbox("Pilih Folder Eksisting", existing_folders)
+        new_folder = st.text_input("Atau ketik path folder baru (contoh: /Dapur/SOP/)")
         final_folder = new_folder if new_folder else selected_folder
 
     if st.button("Daftarkan Karyawan", type="primary"):
@@ -347,10 +396,10 @@ def admin_employee_management():
         )
         if email_list:
             temp_passwords = db.add_users_bulk(email_list, final_folder, company_id)
-            st.success(f"Berhasil mendaftarkan {len(temp_passwords)} karyawan!")
-            st.warning(
-                "Salin dan kirim password sementara ini ke masing-masing karyawan (hanya tampil sekali):"
+            st.success(
+                f"Berhasil mendaftarkan {len(temp_passwords)} karyawan dan membuat akses folder {final_folder}!"
             )
+            st.warning("Salin password sementara ini ke masing-masing karyawan:")
             st.dataframe(
                 pd.DataFrame(
                     [
@@ -366,19 +415,19 @@ def admin_employee_management():
 
 def universal_uploader():
     company_id = st.session_state.user["company_id"]
-    st.header("Universal KOS Uploader")
+    st.header("Uploader Terpusat")
     st.write(
-        "Unggah dokumen, file resep (CSV), atau video panduan (MP4/MP3). AI akan mengekstraknya otomatis."
+        "Unggah dokumen. Sistem secara otomatis membuatkan direktori jika path yang diketik belum ada."
     )
 
     folder_target = st.text_input(
-        "Target Folder Penyimpanan", value="/", help="Contoh: /Dapur/Resep/"
+        "Target Penyimpanan", value="/", help="Contoh: /Dapur/Resep/"
     )
     uploaded_files = st.file_uploader(
         "Pilih File (PDF, CSV, MP4, MP3)", accept_multiple_files=True
     )
 
-    if st.button("Mulai Proses & Ekstrak Data"):
+    if st.button("Proses File"):
         if not uploaded_files:
             st.error("Pilih minimal satu file!")
             return
@@ -400,7 +449,7 @@ def universal_uploader():
                             folder_target,
                             {"tipe_file": "CSV Row", "sumber": file.name},
                         )
-                    st.success(f"File {file.name} (CSV) dipecah & berhasil disimpan!")
+                    st.success(f"CSV diproses ke direktori {folder_target}")
 
                 elif ext in ["mp4", "mp3", "mov", "wav"]:
                     temp_path = f"temp_{file.name}"
@@ -421,15 +470,13 @@ def universal_uploader():
                             {"tipe_file": "Multimodal Transkrip"},
                         )
                         st.success(
-                            f"Transkrip file {file.name} berhasil diekstrak dan disimpan!"
+                            f"Ekstraksi audio/video berhasil disimpan ke {folder_target}"
                         )
                     finally:
                         if os.path.exists(temp_path):
                             os.remove(temp_path)
                 else:
-                    st.warning(
-                        f"Format {ext} belum didukung secara penuh di prototipe ini."
-                    )
+                    st.warning(f"Format {ext} belum didukung penuh.")
 
 
 # ==========================================
@@ -444,7 +491,7 @@ else:
 
     if role == "Admin":
         selected = sidebar_nav(
-            ["Chat KOS", "File Manager", "Upload Dokumen", "Karyawan"],
+            ["Chat KOS", "File Manager", "Upload Dokumen", "Manajemen Karyawan"],
             ["chat-dots", "folder", "cloud-upload", "people"],
         )
         if selected == "Chat KOS":
@@ -455,7 +502,6 @@ else:
             universal_uploader()
         else:
             admin_employee_management()
-
     else:
         selected = sidebar_nav(["Chat KOS", "File Manager"], ["chat-dots", "folder"])
         if selected == "Chat KOS":

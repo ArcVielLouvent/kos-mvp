@@ -42,7 +42,6 @@ def normalize_folder(path: str) -> str:
 # COMPANY & AUTH
 # ==========================================
 def register_company(company_name: str, admin_email: str, password: str) -> str:
-    """Buat entitas perusahaan baru + akun Admin pertamanya, atomik di 1 transaksi."""
     client = get_client()
     try:
         result = client.rpc(
@@ -83,15 +82,14 @@ def update_password(email: str, new_password: str):
 
 
 # ==========================================
-# KARYAWAN (Paste & Pick, per perusahaan)
+# KARYAWAN
 # ==========================================
 def add_users_bulk(emails: list, folder_access: str, company_id: str) -> dict:
-    """
-    Tambah banyak karyawan sekaligus.
-    Return: dict {email: temp_password} untuk ditampilkan admin sekali saja.
-    """
     client = get_client()
     folder_access = normalize_folder(folder_access)
+
+    # Sinkronisasi: Otomatis buat folder ini agar tidak ada "folder gaib"
+    create_folder(company_id, folder_access)
 
     records = []
     temp_passwords = {}
@@ -145,6 +143,10 @@ def insert_document(
     metadata: dict = None,
 ):
     client = get_client()
+
+    # Sinkronisasi: Pastikan folder tempat dokumen disimpan benar-benar ada
+    create_folder(company_id, folder_path)
+
     return (
         client.table("documents")
         .insert(
@@ -180,12 +182,40 @@ def search_documents(
     return response.data
 
 
+def delete_document(doc_id: str):
+    client = get_client()
+    client.table("documents").delete().eq("id", doc_id).execute()
+
+
+def move_document(doc_id: str, new_path: str, company_id: str):
+    client = get_client()
+    new_path = normalize_folder(new_path)
+    create_folder(company_id, new_path)
+    client.table("documents").update({"folder_path": new_path}).eq(
+        "id", doc_id
+    ).execute()
+
+
 # ---------- FILE MANAGER ----------
 def create_folder(company_id: str, path: str):
     client = get_client()
     path = normalize_folder(path)
     client.table("folders").upsert(
         {"company_id": company_id, "path": path}, on_conflict="company_id,path"
+    ).execute()
+
+
+def delete_folder_and_contents(company_id: str, folder_path: str):
+    client = get_client()
+    folder_path = normalize_folder(folder_path)
+
+    # Hapus dokumen di dalamnya
+    client.table("documents").delete().eq("company_id", company_id).ilike(
+        "folder_path", f"{folder_path}%"
+    ).execute()
+    # Hapus folder beserta sub-foldernya
+    client.table("folders").delete().eq("company_id", company_id).ilike(
+        "path", f"{folder_path}%"
     ).execute()
 
 

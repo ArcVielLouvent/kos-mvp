@@ -34,7 +34,7 @@ def landing_page():
     with col2:
         with st.container(border=True):
             st.markdown(
-                "<h2 style='text-align: center;'>🧠 KOS Enterprise</h2>",
+                "<h2 style='text-align: center;'>KOS</h2>",
                 unsafe_allow_html=True,
             )
             st.markdown(

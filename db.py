@@ -312,3 +312,64 @@ def rename_chat_session(session_id: str, new_title: str):
 def delete_chat_session(session_id: str):
     client = get_client()
     client.table("chat_sessions").delete().eq("id", session_id).execute()
+
+
+def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
+    """
+    Mengganti nama folder dan secara otomatis memperbarui path di semua:
+    1. Tabel Folders
+    2. Tabel Documents
+    3. Tabel Users (folder_access)
+    """
+    client = get_client()
+    old_path = normalize_folder(old_path)
+
+    # Pecah path lama untuk merakit path baru
+    parts = [p for p in old_path.split("/") if p]
+    if not parts:
+        return  # Root '/' tidak bisa di-rename
+
+    parent_path = "/" + "/".join(parts[:-1]) + "/" if len(parts) > 1 else "/"
+    new_path = parent_path + new_name.strip() + "/"
+
+    # 1. Update Tabel Folders
+    folders = (
+        client.table("folders")
+        .select("path")
+        .eq("company_id", company_id)
+        .ilike("path", f"{old_path}%")
+        .execute()
+    )
+    for f in folders.data:
+        updated_path = f["path"].replace(old_path, new_path, 1)
+        client.table("folders").update({"path": updated_path}).eq("path", f["path"]).eq(
+            "company_id", company_id
+        ).execute()
+
+    # 2. Update Tabel Documents
+    docs = (
+        client.table("documents")
+        .select("id, folder_path")
+        .eq("company_id", company_id)
+        .ilike("folder_path", f"{old_path}%")
+        .execute()
+    )
+    for d in docs.data:
+        updated_path = d["folder_path"].replace(old_path, new_path, 1)
+        client.table("documents").update({"folder_path": updated_path}).eq(
+            "id", d["id"]
+        ).execute()
+
+    # 3. Update Tabel Users (Akses Karyawan otomatis mengikuti nama folder baru)
+    users = (
+        client.table("users")
+        .select("email, folder_access")
+        .eq("company_id", company_id)
+        .ilike("folder_access", f"{old_path}%")
+        .execute()
+    )
+    for u in users.data:
+        updated_path = u["folder_access"].replace(old_path, new_path, 1)
+        client.table("users").update({"folder_access": updated_path}).eq(
+            "email", u["email"]
+        ).execute()

@@ -2,8 +2,6 @@ import os
 from google import genai
 from google.genai import types
 import streamlit as st
-from paddleocr import PaddleOCR
-from pdf2image import convert_from_path
 
 
 def get_client() -> genai.Client:
@@ -30,65 +28,18 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list:
 
 @st.cache_resource
 def get_embedding_model() -> str:
-    """RADAR DINAMIS: Menemukan model Embedding dengan SDK baru"""
-    client = get_client()
-    try:
-        for m in client.models.list():
-            if "embedContent" in m.supported_generation_methods:
-                return m.name.replace("models/", "")
-    except Exception:
-        pass
-    return "text-embedding-004"
-
-
-@st.cache_resource
-def get_embedding_model() -> str:
-    """Otomatis beralih ke lini Gemini Embedding terbaru (Anti-404)"""
-    client = get_client()
-    try:
-        models = [m.name.replace("models/", "") for m in client.models.list()]
-        for m in models:
-            if "gemini-embedding" in m:
-                return m
-        for m in models:
-            if "embedding" in m:
-                return m
-    except Exception:
-        pass
-    # Fallback ke lini terbaru Google API saat ini
+    """Otomatis beralih ke lini Gemini Embedding terbaru"""
     return "gemini-embedding-2"
 
 
 @st.cache_resource
 def get_generation_model() -> str:
-    """
-    Langsung dipasang ke Gemini generasi 3.5 / 3 Flash yang modern.
-    Menghindari error pemutusan model lawas dari server Google.
-    """
-    client = get_client()
-    try:
-        models = [m.name.replace("models/", "") for m in client.models.list() if 'generateContent' in m.supported_generation_methods]
-        
-        for m in models:
-            if "3.5-flash" in m: return m
-        for m in models:
-            if "3-flash" in m: return m
-        for m in models:
-            if "flash" in m: return m
-            
-        if models:
-            return models[0]
-    except Exception:
-        pass
-    
+    """Menggunakan lini Gemini Flash paling mutakhir dan stabil"""
     return "gemini-3.5-flash"
 
 
 def embed_text(text: str) -> list:
-    """
-    Sintaks ekstraksi array embedding dengan pembatasan dimensi
-    agar cocok dengan kolom vector(768) di database Supabase Anda.
-    """
+    """Sintaks ekstraksi array embedding dengan pembatasan dimensi ke 768"""
     client = get_client()
     model_name = get_embedding_model()
 
@@ -124,55 +75,51 @@ Jika jawaban tidak ada di dalam dokumen referensi, katakan jujur bahwa informasi
 
 Pertanyaan: {question}
 """
-    model_name = get_generation_model() 
-    
+    model_name = get_generation_model()
     response = client.models.generate_content(
-        model=model_name, 
+        model=model_name,
         contents=prompt,
     )
     return response.text
 
 
-@st.cache_resource
-def init_paddle_ocr():
-    """Inisialisasi PaddleOCR sekali saja dan simpan di cache Streamlit"""
-    return PaddleOCR(use_angle_cls=True, lang="en")
-
-
 def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str:
     """
-    Menghapus argumen 'cls' yang tidak didukung pada method ocr() versi baru.
+    MENGGUNAKAN NATIVE GEMINI FILE API (Ringan, Tanpa Memori Server Lokal).
+    Menyerahkan tugas pembacaan PDF sepenuhnya ke server Google Cloud secara gratis.
     """
     if "pdf" not in mime_type:
-        return "Ekstraksi non-PDF memerlukan metode penanganan file biner yang berbeda."
+        raise ValueError(
+            "Ekstraksi non-PDF memerlukan metode penanganan biner yang berbeda."
+        )
 
     try:
-        # 1. Mengambil objek PaddleOCR dari cache (cls=True sudah diset aman di sini)
-        ocr = init_paddle_ocr()
-        
-        # 2. Konversi lembar halaman PDF menjadi gambar
-        pages = convert_from_path(file_path, dpi=150)
-        full_text = []
-        
-        for i, page in enumerate(pages):
-            temp_img_path = f"temp_page_{i}.jpg"
-            page.save(temp_img_path, 'JPEG')
-            
-            result = ocr.ocr(temp_img_path)
-            
-            page_text = []
-            if result and result[0]:
-                for line in result[0]:
-                    text_detected = line[1][0]
-                    page_text.append(text_detected)
-            
-            full_text.append(f"--- Halaman {i+1} ---\n" + "\n".join(page_text))
-            
-            # Bersihkan file temporary
-            if os.path.exists(temp_img_path):
-                os.remove(temp_img_path)
-            
-        return "\n\n".join(full_text)
-        
+        client = get_client()
+
+        # 1. Unggah file langsung ke staging area cloud Google Gemini (Mendukung hingga 2GB)
+        uploaded_file = client.files.upload(file=file_path)
+
+        # 2. Berikan instruksi pembacaan teks terstruktur
+        prompt = "Baca seluruh dokumen PDF ini dengan saksama dan ekstrak seluruh teks serta tabel menjadi teks terstruktur murni."
+        model_name = get_generation_model()
+
+        # 3. Model Gemini melakukan OCR secara cloud dan mengembalikan hasilnya
+        response = client.models.generate_content(
+            model=model_name, contents=[uploaded_file, prompt]
+        )
+
+        # 4. Bersihkan file dari server Google demi privasi data
+        try:
+            client.files.delete(name=uploaded_file.name)
+        except Exception:
+            pass
+
+        hasil_teks = response.text
+
+        if not hasil_teks or not hasil_teks.strip():
+            raise ValueError("Tidak ada teks yang bisa dibaca dari dokumen PDF ini.")
+
+        return hasil_teks
+
     except Exception as e:
-        return f"Gagal mengekstrak teks PDF melalui PaddleOCR lokal: {str(e)}"
+        raise RuntimeError(f"Gagal mengekstrak PDF via Google File API: {str(e)}")

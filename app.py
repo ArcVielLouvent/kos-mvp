@@ -4,7 +4,6 @@ import time  # <-- LIBRARY JEDA WAKTU ANTI SPAM
 import pandas as pd
 import streamlit as st
 from streamlit_option_menu import option_menu
-from gtts import gTTS
 
 import db
 import ai
@@ -106,8 +105,21 @@ st.markdown(
             margin: var(--kos-4) 0 var(--kos-1) 0;
         }
 
+        /* Navbar sederhana, cuma nama perusahaan */
         .st-key-kos-navbar { padding-bottom: var(--kos-3); }
-        div[data-testid="stSidebarUserContent"] { padding-top: var(--kos-2) !important; }
+
+        /* Sidebar: dorong panel akun ke paling bawah */
+        div[data-testid="stSidebarUserContent"] {
+            padding-top: var(--kos-2) !important;
+            display: flex !important;
+            flex-direction: column !important;
+            min-height: calc(100vh - 2rem) !important;
+        }
+        .st-key-kos-sidebar-account {
+            margin-top: auto !important;
+            padding-top: var(--kos-4) !important;
+            border-top: 1px solid var(--kos-border);
+        }
     </style>
 """,
     unsafe_allow_html=True,
@@ -158,7 +170,8 @@ def landing_page():
 
             if st.session_state.auth_view == "login":
                 login_email = st.text_input("Email", key="log_email")
-                login_pass = st.text_input("Password", type="password", key="log_pass")
+                login_pass = st.text_input(
+                    "Password", type="password", key="log_pass")
                 st.write("")
                 if st.button(
                     "Login workspace",
@@ -205,7 +218,8 @@ def landing_page():
                 ):
                     if reg_company and reg_email and reg_pass:
                         try:
-                            db.register_company(reg_company, reg_email, reg_pass)
+                            db.register_company(
+                                reg_company, reg_email, reg_pass)
                             st.success("Berhasil didaftarkan. Silakan login.")
                         except ValueError as e:
                             st.error(str(e))
@@ -223,7 +237,8 @@ def force_password_change():
     with col2:
         with st.container(border=True):
             st.subheader("Buat password baru")
-            new_pw = st.text_input("Password baru", type="password", key="new_pw")
+            new_pw = st.text_input(
+                "Password baru", type="password", key="new_pw")
             confirm = st.text_input(
                 "Ulangi password", type="password", key="confirm_pw"
             )
@@ -243,38 +258,20 @@ def force_password_change():
 
 
 # ==========================================
-# NAVBAR GLOBAL
+# NAVBAR GLOBAL — cuma nama perusahaan
 # ==========================================
 def render_navbar():
     with st.container(key="kos-navbar"):
-        company_name = st.session_state.user.get("company_name") or "Perusahaan"
-        user_name = (
-            st.session_state.user["email"].split("@")[0].replace(".", " ").title()
+        company_name = st.session_state.user.get(
+            "company_name") or "Perusahaan"
+        st.markdown(
+            f"<h4 style='margin:0;'>{company_name}</h4>", unsafe_allow_html=True
         )
-
-        col1, col2 = st.columns([3, 1], vertical_alignment="center")
-        with col1:
-            st.markdown(
-                f"<h4 style='margin:0;'>{company_name}</h4>", unsafe_allow_html=True
-            )
-        with col2:
-            with st.popover(
-                user_name, use_container_width=True, icon=":material/account_circle:"
-            ):
-                st.write(f"**{st.session_state.user['email']}**")
-                st.caption(st.session_state.user.get("role", ""))
-                st.divider()
-                st.button(
-                    "Logout",
-                    on_click=logout,
-                    use_container_width=True,
-                    icon=":material/logout:",
-                )
         st.divider()
 
 
 # ==========================================
-# SIDEBAR NAVIGASI + RIWAYAT CHAT
+# SIDEBAR NAVIGASI + RIWAYAT CHAT + AKUN (di bawah)
 # ==========================================
 def sidebar_nav(options: list, icons: list, current_menu: str):
     with st.sidebar:
@@ -282,7 +279,8 @@ def sidebar_nav(options: list, icons: list, current_menu: str):
             menu_title=None,
             options=options,
             icons=icons,
-            default_index=options.index(current_menu) if current_menu in options else 0,
+            default_index=options.index(
+                current_menu) if current_menu in options else 0,
             styles={
                 "container": {"padding": "0", "background-color": "transparent"},
                 "icon": {"font-size": "15px", "color": "#71717a"},
@@ -293,7 +291,8 @@ def sidebar_nav(options: list, icons: list, current_menu: str):
 
         if selected == "Chat KOS":
             st.divider()
-            st.markdown("<p class='kos-label'>Riwayat</p>", unsafe_allow_html=True)
+            st.markdown("<p class='kos-label'>Riwayat</p>",
+                        unsafe_allow_html=True)
             if st.button("Chat baru", use_container_width=True, icon=":material/add:"):
                 st.session_state.current_session_id = None
                 st.rerun()
@@ -331,18 +330,38 @@ def sidebar_nav(options: list, icons: list, current_menu: str):
                                 if st.session_state.current_session_id == s["id"]:
                                     st.session_state.current_session_id = None
                                 st.rerun()
+
+        # --- Panel akun, selalu di paling bawah sidebar ---
+        with st.container(key="kos-sidebar-account"):
+            user_name = (
+                st.session_state.user["email"].split(
+                    "@")[0].replace(".", " ").title()
+            )
+            with st.popover(
+                user_name, use_container_width=True, icon=":material/account_circle:"
+            ):
+                st.write(f"**{st.session_state.user['email']}**")
+                st.caption(st.session_state.user.get("role", ""))
+                st.divider()
+                st.button(
+                    "Logout",
+                    on_click=logout,
+                    use_container_width=True,
+                    icon=":material/logout:",
+                )
     return selected
 
 
 # ==========================================
-# CHAT KOS (STT/TTS Terintegrasi)
+# CHAT KOS
 # ==========================================
 def chat_page():
     user = st.session_state.user
     user_name = user["email"].split("@")[0].replace(".", " ").title()
 
     if not st.session_state.current_session_id:
-        st.markdown(f"<h3>Selamat datang, {user_name}</h3>", unsafe_allow_html=True)
+        st.markdown(
+            f"<h3>Selamat datang, {user_name}</h3>", unsafe_allow_html=True)
         st.caption(
             f"Ruang kerja aktif: {user['folder_access']} · AI hanya mencari dokumen di dalam folder Anda"
         )
@@ -354,41 +373,24 @@ def chat_page():
                 st.write(m["content"])
 
     question = st.chat_input("Ketik pertanyaan Anda di sini...")
-    audio_val = st.audio_input("Gunakan suara")
 
-    final_query = question
-
-    if not final_query and audio_val:
-        with st.spinner("Menerjemahkan suara..."):
-            with open("temp_audio_chat.wav", "wb") as f:
-                f.write(audio_val.getbuffer())
-            try:
-                final_query = ai.extract_multimodal(
-                    "temp_audio_chat.wav", "audio/wav", "Voice Prompt"
-                )
-            except Exception as e:
-                st.error(f"Gagal memproses suara: {e}")
-            finally:
-                if os.path.exists("temp_audio_chat.wav"):
-                    os.remove("temp_audio_chat.wav")
-
-    if final_query:
+    if question:
         if not st.session_state.current_session_id:
             st.session_state.current_session_id = db.create_chat_session(
                 user["email"], user["company_id"]
             )
             db.rename_chat_session(
-                st.session_state.current_session_id, final_query[:30]
-            )
+                st.session_state.current_session_id, question[:30])
 
-        db.add_chat_message(st.session_state.current_session_id, "user", final_query)
+        db.add_chat_message(
+            st.session_state.current_session_id, "user", question)
         with st.chat_message("user"):
-            st.write(final_query)
+            st.write(question)
 
         with st.chat_message("assistant"):
             with st.spinner("Mencari referensi..."):
                 try:
-                    q_emb = ai.embed_text(final_query)
+                    q_emb = ai.embed_text(question)
                     docs = db.search_documents(
                         q_emb,
                         company_id=user["company_id"],
@@ -396,28 +398,20 @@ def chat_page():
                         folder_prefix=user["folder_access"],
                     )
                     answer = (
-                        ai.generate_answer(final_query, docs)
+                        ai.generate_answer(question, docs)
                         if docs
                         else "Tidak ada referensi dokumen ditemukan di folder Anda."
                     )
                     st.write(answer)
-
-                    if docs and st.button(
-                        "Dengarkan",
-                        key=f"tts_{final_query[:20]}",
-                        icon=":material/volume_up:",
-                    ):
-                        tts = gTTS(text=answer, lang="id")
-                        tts.save("response.mp3")
-                        st.audio("response.mp3")
-
                     db.add_chat_message(
                         st.session_state.current_session_id, "assistant", answer
                     )
-                    st.rerun()
-
                 except Exception as e:
+                    answer = None
                     st.error(f"Kesalahan pada mesin AI: {str(e)}")
+
+        if answer is not None:
+            st.rerun()
 
 
 # ==========================================
@@ -478,7 +472,8 @@ def file_manager_page():
                 new_name = st.text_input("Nama folder")
                 if st.button("Buat", type="primary", key="btn_create_folder"):
                     if new_name.strip():
-                        db.create_folder(company_id, current + new_name.strip() + "/")
+                        db.create_folder(company_id, current +
+                                         new_name.strip() + "/")
                         flash(f"Folder '{new_name.strip()}' dibuat.")
                         st.rerun(scope="fragment")
         with col_b:
@@ -518,9 +513,7 @@ def file_manager_page():
                                                 current,
                                                 {"tipe_file": "CSV Data"},
                                             )
-                                            time.sleep(
-                                                0.5
-                                            )  # Jeda per baris (Anti-Spam)
+                                            time.sleep(0.5)
 
                                     elif ext in ["txt", "md"]:
                                         content = f.getvalue().decode("utf-8")
@@ -540,9 +533,7 @@ def file_manager_page():
                                                 current,
                                                 {"tipe_file": "Teks"},
                                             )
-                                            time.sleep(
-                                                0.5
-                                            )  # Jeda per chunk (Anti-Spam)
+                                            time.sleep(0.5)
 
                                     elif ext == "pdf":
                                         temp = f"temp_{f.name}"
@@ -567,7 +558,7 @@ def file_manager_page():
                                                 current,
                                                 {"tipe_file": "Dokumen PDF"},
                                             )
-                                            time.sleep(1)  # Jeda per chunk (Anti-Spam)
+                                            time.sleep(1)
                                         if os.path.exists(temp):
                                             os.remove(temp)
 
@@ -599,7 +590,7 @@ def file_manager_page():
                                                 current,
                                                 {"tipe_file": "Media Transkrip"},
                                             )
-                                            time.sleep(1)  # Jeda per chunk (Anti-Spam)
+                                            time.sleep(1)
                                         if os.path.exists(temp):
                                             os.remove(temp)
 
@@ -610,9 +601,7 @@ def file_manager_page():
                                         continue
 
                                     success_count += 1
-                                    time.sleep(
-                                        2
-                                    )  # Jeda antar file penuh untuk mendinginkan mesin Google
+                                    time.sleep(2)
 
                                 except Exception as e:
                                     error_logs.append(f"{f.name}: {str(e)}")
@@ -624,7 +613,8 @@ def file_manager_page():
                                 st.error(msg)
 
                         if success_count > 0:
-                            flash(f"{success_count} file berhasil masuk ke {current}.")
+                            flash(
+                                f"{success_count} file berhasil masuk ke {current}.")
                             if not error_logs:
                                 st.rerun(scope="fragment")
 
@@ -663,7 +653,8 @@ def file_manager_page():
                             if st.button(
                                 "Simpan", key=f"sv_{child}", icon=":material/save:"
                             ):
-                                db.rename_folder_cascade(company_id, child, rn_name)
+                                db.rename_folder_cascade(
+                                    company_id, child, rn_name)
                                 st.rerun(scope="fragment")
                             st.divider()
                             if st.button(
@@ -672,7 +663,8 @@ def file_manager_page():
                                 type="primary",
                                 icon=":material/delete:",
                             ):
-                                db.delete_folder_and_contents(company_id, child)
+                                db.delete_folder_and_contents(
+                                    company_id, child)
                                 st.rerun(scope="fragment")
 
     if docs:
@@ -680,7 +672,8 @@ def file_manager_page():
         with st.container(key="kos-row"):
             for d in docs:
                 title_short = (
-                    d["title"] if len(d["title"]) <= 46 else d["title"][:46] + "..."
+                    d["title"] if len(
+                        d["title"]) <= 46 else d["title"][:46] + "..."
                 )
                 row = st.columns([7, 2, 1], vertical_alignment="center")
                 with row[0]:
@@ -728,7 +721,8 @@ def admin_employee_management():
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        emails_text = st.text_area("Daftar email karyawan (pisahkan baris)", height=150)
+        emails_text = st.text_area(
+            "Daftar email karyawan (pisahkan baris)", height=150)
     with col2:
         folders = db.get_unique_folders(company_id)
         selected_folder = st.selectbox("Pilih akses folder utama", folders)
@@ -744,7 +738,8 @@ def admin_employee_management():
             st.success(f"{len(temp)} karyawan ditambahkan ke {final_folder}.")
             st.dataframe(
                 pd.DataFrame(
-                    [{"Email": e, "Password sementara": p} for e, p in temp.items()]
+                    [{"Email": e, "Password sementara": p}
+                        for e, p in temp.items()]
                 ),
                 use_container_width=True,
             )

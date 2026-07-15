@@ -1,5 +1,6 @@
 import re
 import os
+import time  # <-- LIBRARY JEDA WAKTU ANTI SPAM
 import pandas as pd
 import streamlit as st
 from streamlit_option_menu import option_menu
@@ -357,7 +358,6 @@ def chat_page():
 
     final_query = question
 
-    # Proses Speech-To-Text menggunakan Multimodal Gemini
     if not final_query and audio_val:
         with st.spinner("Menerjemahkan suara..."):
             with open("temp_audio_chat.wav", "wb") as f:
@@ -402,7 +402,6 @@ def chat_page():
                     )
                     st.write(answer)
 
-                    # Text-To-Speech (TTS)
                     if docs and st.button(
                         "Dengarkan",
                         key=f"tts_{final_query[:20]}",
@@ -498,11 +497,12 @@ def file_manager_page():
                         success_count = 0
                         error_logs = []
 
-                        with st.spinner(f"Memproses {len(uploaded_files)} file..."):
+                        with st.spinner(
+                            f"Memproses {len(uploaded_files)} file... (Mohon tunggu, ada jeda anti-spam)"
+                        ):
                             for f in uploaded_files:
                                 ext = f.name.split(".")[-1].lower()
                                 try:
-                                    # 1. CSV Processing
                                     if ext == "csv":
                                         df = pd.read_csv(f)
                                         for idx, row in df.iterrows():
@@ -518,8 +518,10 @@ def file_manager_page():
                                                 current,
                                                 {"tipe_file": "CSV Data"},
                                             )
+                                            time.sleep(
+                                                0.5
+                                            )  # Jeda per baris (Anti-Spam)
 
-                                    # 2. Plain Text Processing
                                     elif ext in ["txt", "md"]:
                                         content = f.getvalue().decode("utf-8")
                                         chunks = ai.chunk_text(content)
@@ -538,8 +540,10 @@ def file_manager_page():
                                                 current,
                                                 {"tipe_file": "Teks"},
                                             )
+                                            time.sleep(
+                                                0.5
+                                            )  # Jeda per chunk (Anti-Spam)
 
-                                    # 3. PDF Processing (Multimodal to text)
                                     elif ext == "pdf":
                                         temp = f"temp_{f.name}"
                                         with open(temp, "wb") as file:
@@ -563,10 +567,10 @@ def file_manager_page():
                                                 current,
                                                 {"tipe_file": "Dokumen PDF"},
                                             )
+                                            time.sleep(1)  # Jeda per chunk (Anti-Spam)
                                         if os.path.exists(temp):
                                             os.remove(temp)
 
-                                    # 4. Media Processing (Audio/Video)
                                     elif ext in ["mp4", "mp3", "mov", "wav"]:
                                         temp = f"temp_{f.name}"
                                         with open(temp, "wb") as file:
@@ -595,6 +599,7 @@ def file_manager_page():
                                                 current,
                                                 {"tipe_file": "Media Transkrip"},
                                             )
+                                            time.sleep(1)  # Jeda per chunk (Anti-Spam)
                                         if os.path.exists(temp):
                                             os.remove(temp)
 
@@ -605,21 +610,22 @@ def file_manager_page():
                                         continue
 
                                     success_count += 1
+                                    time.sleep(
+                                        2
+                                    )  # Jeda antar file penuh untuk mendinginkan mesin Google
 
                                 except Exception as e:
                                     error_logs.append(f"{f.name}: {str(e)}")
-                                    # Pastikan temp file dihapus jika gagal di tengah jalan
                                     if "temp" in locals() and os.path.exists(temp):
                                         os.remove(temp)
 
-                        # Hentikan layar dan paksa baca error jika ada kegagalan
                         if error_logs:
                             for msg in error_logs:
                                 st.error(msg)
 
                         if success_count > 0:
                             flash(f"{success_count} file berhasil masuk ke {current}.")
-                            if not error_logs:  # Hanya refresh otomatis jika 100% mulus
+                            if not error_logs:
                                 st.rerun(scope="fragment")
 
     st.divider()

@@ -1,16 +1,13 @@
 from google import genai
+from google.genai import types
 import streamlit as st
-import time
-import os
-
 
 def get_client() -> genai.Client:
-    """Inisialisasi Client menggunakan SDK google-genai yang baru"""
+    """Inisialisasi Client menggunakan SDK google-genai yang mutakhir"""
     return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list:
-    """Sistem pemotong teks (Chunking) agar tidak melebihi limit token Supabase/Embedding"""
+    """Sistem pemotong teks (Chunking) untuk mencegah Limit Token"""
     if not text:
         return []
     chunks = []
@@ -25,24 +22,52 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list:
         i = end - overlap
     return [c for c in chunks if len(c) > 10]
 
+@st.cache_resource
+def get_embedding_model() -> str:
+    """RADAR DINAMIS: Menemukan model Embedding dengan SDK baru"""
+    client = get_client()
+    try:
+        for m in client.models.list():
+            if 'embedContent' in m.supported_generation_methods:
+                # SDK baru lebih stabil tanpa prefix 'models/'
+                return m.name.replace("models/", "")
+    except Exception:
+        pass
+    return "text-embedding-004"
+
+@st.cache_resource
+def get_generation_model() -> str:
+    """RADAR DINAMIS: Menemukan model Generate yang anti-404"""
+    client = get_client()
+    try:
+        models = [m.name.replace("models/", "") for m in client.models.list() if 'generateContent' in m.supported_generation_methods]
+        for m in models:
+            if "gemini-1.5-flash" in m: return m
+        for m in models:
+            if "flash" in m: return m
+        if models:
+            return models[0]
+    except Exception:
+        pass
+    return "gemini-1.5-flash"
 
 def embed_text(text: str) -> list:
     client = get_client()
-    # Pada SDK baru, text-embedding-004 didukung penuh tanpa error 404
+    model_name = get_embedding_model()
+    
     result = client.models.embed_content(
-        model="text-embedding-004",
+        model=model_name,
         contents=text,
     )
-    # Cara baru mengambil array vektor dari response
+    # Sintaks pengambilan array pada SDK baru
     return result.embeddings[0].values
-
 
 def generate_answer(question: str, context_documents: list) -> str:
     client = get_client()
     context_parts = []
     for doc in context_documents:
-        sumber = doc.get("metadata", {}).get("tipe_file", "Dokumen KOS")
-        folder = doc.get("folder_path", "/")
+        sumber = doc.get('metadata', {}).get('tipe_file', 'Dokumen KOS')
+        folder = doc.get('folder_path', '/')
         context_parts.append(
             f"Judul: {doc['title']}\nLokasi: {folder}\nTipe: {sumber}\nIsi:\n{doc['content']}"
         )
@@ -59,44 +84,44 @@ Jika jawaban tidak ada di dalam dokumen referensi, katakan jujur bahwa informasi
 
 Pertanyaan: {question}
 """
-    # Menggunakan model flash terbaru untuk chat RAG
+    model_name = get_generation_model()
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=model_name, 
         contents=prompt,
     )
     return response.text
 
-
 def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str:
-    """Sistem Upload & Ekstraksi File menggunakan syntax SDK google-genai terbaru"""
-    client = get_client()
-
-    # 1. Upload file fisik ke server Google
-    uploaded_file = client.files.upload(
-        file=file_path, config={"display_name": display_name}
-    )
-
-    # 2. Polling menunggu proses di server Google selesai
-    while uploaded_file.state.name == "PROCESSING":
-        time.sleep(3)
-        uploaded_file = client.files.get(name=uploaded_file.name)
-
-    if uploaded_file.state.name == "FAILED":
-        client.files.delete(name=uploaded_file.name)
-        raise ValueError(f"Google Gemini gagal memproses file {display_name}.")
-
-    # 3. Penentuan Prompt
+    """
+    Menggunakan API Key yang SAMA dari st.secrets['GEMINI_API_KEY'].
+    Tidak perlu login tambahan, aman untuk file PDF besar (Anti 404).
+    """
+    # 1. Mengambil client yang sudah dikonfigurasi dengan API Key Anda
+    client = get_client() 
+    
+    # 2. Upload file menggunakan client tersebut
+    uploaded_file = client.files.upload(file=file_path)
+    
     if "pdf" in mime_type:
         prompt = "Baca seluruh dokumen PDF ini dengan saksama dan ekstrak seluruh teks serta tabel menjadi teks terstruktur. Abaikan gambar yang tidak penting."
     else:
-        prompt = "Tonton/Dengarkan file ini dengan saksama. Buatkan transkrip yang sangat detail. Jika ada teks di layar, tuliskan juga."
-
-    # 4. Ekstraksi konten dengan model Pro
+        prompt = "Tonton/Dengarkan file ini dengan saksama. Buatkan transkrip yang sangat detail."
+        
+    model_name = get_generation_model()
+    
+    # 3. Kirim referensi berkas hasil unggahan ke Gemini
     response = client.models.generate_content(
-        model="gemini-2.5-pro", contents=[uploaded_file, prompt]
+        model=model_name,
+        contents=[
+            uploaded_file,
+            prompt
+        ]
     )
-
-    # 5. Pembersihan file di server Google agar kuota aman
-    client.files.delete(name=uploaded_file.name)
-
+    
+    # 4. Hapus berkas dari server setelah teks berhasil diekstrak
+    try:
+        client.files.delete(name=uploaded_file.name)
+    except Exception:
+        pass
+        
     return response.text

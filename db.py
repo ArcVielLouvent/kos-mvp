@@ -88,7 +88,6 @@ def add_users_bulk(emails: list, folder_access: str, company_id: str) -> dict:
     client = get_client()
     folder_access = normalize_folder(folder_access)
 
-    # Sinkronisasi: Otomatis buat folder ini agar tidak ada "folder gaib"
     create_folder(company_id, folder_access)
 
     records = []
@@ -144,7 +143,6 @@ def insert_document(
 ):
     client = get_client()
 
-    # Sinkronisasi: Pastikan folder tempat dokumen disimpan benar-benar ada
     create_folder(company_id, folder_path)
 
     return (
@@ -209,11 +207,9 @@ def delete_folder_and_contents(company_id: str, folder_path: str):
     client = get_client()
     folder_path = normalize_folder(folder_path)
 
-    # Hapus dokumen di dalamnya
     client.table("documents").delete().eq("company_id", company_id).ilike(
         "folder_path", f"{folder_path}%"
     ).execute()
-    # Hapus folder beserta sub-foldernya
     client.table("folders").delete().eq("company_id", company_id).ilike(
         "path", f"{folder_path}%"
     ).execute()
@@ -315,24 +311,16 @@ def delete_chat_session(session_id: str):
 
 
 def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
-    """
-    Mengganti nama folder dan secara otomatis memperbarui path di semua:
-    1. Tabel Folders
-    2. Tabel Documents
-    3. Tabel Users (folder_access)
-    """
     client = get_client()
     old_path = normalize_folder(old_path)
 
-    # Pecah path lama untuk merakit path baru
     parts = [p for p in old_path.split("/") if p]
     if not parts:
-        return  # Root '/' tidak bisa di-rename
+        return
 
     parent_path = "/" + "/".join(parts[:-1]) + "/" if len(parts) > 1 else "/"
     new_path = parent_path + new_name.strip() + "/"
 
-    # 1. Update Tabel Folders
     folders = (
         client.table("folders")
         .select("path")
@@ -346,7 +334,6 @@ def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
             "company_id", company_id
         ).execute()
 
-    # 2. Update Tabel Documents
     docs = (
         client.table("documents")
         .select("id, folder_path")
@@ -360,7 +347,6 @@ def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
             "id", d["id"]
         ).execute()
 
-    # 3. Update Tabel Users (Akses Karyawan otomatis mengikuti nama folder baru)
     users = (
         client.table("users")
         .select("email, folder_access")

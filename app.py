@@ -18,8 +18,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# DESIGN SYSTEM -- CSS dengan spacing presisi pixel
-# Menarget class resmi st.container(key=...) -> .st-key-<nama>
+# DESIGN SYSTEM -- CSS Modern & Borderless List View
 # ==========================================
 st.markdown(
     """
@@ -57,6 +56,13 @@ st.markdown(
         .st-key-kos-row button:hover { background: var(--kos-hover) !important; }
         .st-key-kos-row button:disabled { color: #a1a1aa !important; opacity: 1 !important; }
 
+        div[data-testid="stVerticalBlock"].st-key-kos-row {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+        }
+
         .st-key-kos-crumb button {
             background: transparent !important;
             border: 1px solid var(--kos-border) !important;
@@ -87,6 +93,9 @@ st.markdown(
             background: var(--kos-hover) !important;
             color: #fff !important;
         }
+        div[data-testid="stPopover"] button svg:last-child {
+            display: none !important;
+        }
 
         .kos-label {
             font-size: 11px;
@@ -97,7 +106,6 @@ st.markdown(
         }
 
         .st-key-kos-navbar { padding-bottom: var(--kos-3); }
-
         div[data-testid="stSidebarUserContent"] { padding-top: var(--kos-2) !important; }
     </style>
 """,
@@ -326,7 +334,7 @@ def sidebar_nav(options: list, icons: list, current_menu: str):
 
 
 # ==========================================
-# CHAT KOS
+# CHAT KOS (STT/TTS Terintegrasi)
 # ==========================================
 def chat_page():
     user = st.session_state.user
@@ -348,14 +356,21 @@ def chat_page():
     audio_val = st.audio_input("Gunakan suara")
 
     final_query = question
+
+    # Proses Speech-To-Text menggunakan Multimodal Gemini
     if not final_query and audio_val:
         with st.spinner("Menerjemahkan suara..."):
-            with open("temp_audio.wav", "wb") as f:
+            with open("temp_audio_chat.wav", "wb") as f:
                 f.write(audio_val.getbuffer())
-            final_query = ai.extract_multimodal(
-                "temp_audio.wav", "audio/wav", "Voice Prompt"
-            )
-            os.remove("temp_audio.wav")
+            try:
+                final_query = ai.extract_multimodal(
+                    "temp_audio_chat.wav", "audio/wav", "Voice Prompt"
+                )
+            except Exception as e:
+                st.error(f"Gagal memproses suara: {e}")
+            finally:
+                if os.path.exists("temp_audio_chat.wav"):
+                    os.remove("temp_audio_chat.wav")
 
     if final_query:
         if not st.session_state.current_session_id:
@@ -372,32 +387,42 @@ def chat_page():
 
         with st.chat_message("assistant"):
             with st.spinner("Mencari referensi..."):
-                q_emb = ai.embed_text(final_query)
-                docs = db.search_documents(
-                    q_emb,
-                    company_id=user["company_id"],
-                    match_count=3,
-                    folder_prefix=user["folder_access"],
-                )
-                answer = (
-                    ai.generate_answer(final_query, docs)
-                    if docs
-                    else "Tidak ada referensi dokumen ditemukan di folder Anda."
-                )
-            st.write(answer)
-            if docs and st.button(
-                "Dengarkan", key=f"tts_{final_query[:20]}", icon=":material/volume_up:"
-            ):
-                tts = gTTS(text=answer, lang="id")
-                tts.save("response.mp3")
-                st.audio("response.mp3")
+                try:
+                    q_emb = ai.embed_text(final_query)
+                    docs = db.search_documents(
+                        q_emb,
+                        company_id=user["company_id"],
+                        match_count=3,
+                        folder_prefix=user["folder_access"],
+                    )
+                    answer = (
+                        ai.generate_answer(final_query, docs)
+                        if docs
+                        else "Tidak ada referensi dokumen ditemukan di folder Anda."
+                    )
+                    st.write(answer)
 
-        db.add_chat_message(st.session_state.current_session_id, "assistant", answer)
-        st.rerun()
+                    # Text-To-Speech (TTS)
+                    if docs and st.button(
+                        "Dengarkan",
+                        key=f"tts_{final_query[:20]}",
+                        icon=":material/volume_up:",
+                    ):
+                        tts = gTTS(text=answer, lang="id")
+                        tts.save("response.mp3")
+                        st.audio("response.mp3")
+
+                    db.add_chat_message(
+                        st.session_state.current_session_id, "assistant", answer
+                    )
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"Kesalahan pada mesin AI: {str(e)}")
 
 
 # ==========================================
-# FILE MANAGER
+# FILE MANAGER (Universal Uploader Tahan Banting)
 # ==========================================
 def file_type_icon(metadata: dict) -> str:
     tipe = (metadata or {}).get("tipe_file", "")
@@ -405,6 +430,8 @@ def file_type_icon(metadata: dict) -> str:
         return ":material/bar_chart:"
     if tipe == "Media Transkrip":
         return ":material/videocam:"
+    if tipe == "Dokumen PDF":
+        return ":material/picture_as_pdf:"
     return ":material/description:"
 
 
@@ -460,7 +487,7 @@ def file_manager_page():
                 "Upload file", use_container_width=True, icon=":material/upload_file:"
             ):
                 uploaded_files = st.file_uploader(
-                    "Pilih file",
+                    "Pilih file (PDF, TXT, MD, CSV, Audio, Video)",
                     accept_multiple_files=True,
                     label_visibility="collapsed",
                 )
@@ -468,27 +495,80 @@ def file_manager_page():
                     if not uploaded_files:
                         st.warning("Pilih minimal satu file dulu.")
                     else:
+                        success_count = 0
+                        error_logs = []
+
                         with st.spinner(f"Memproses {len(uploaded_files)} file..."):
                             for f in uploaded_files:
                                 ext = f.name.split(".")[-1].lower()
-                                if ext == "csv":
-                                    df = pd.read_csv(f)
-                                    for idx, row in df.iterrows():
-                                        content = "\n".join(
-                                            f"{c}: {v}" for c, v in row.items()
+                                try:
+                                    # 1. CSV Processing
+                                    if ext == "csv":
+                                        df = pd.read_csv(f)
+                                        for idx, row in df.iterrows():
+                                            content = "\n".join(
+                                                f"{c}: {v}" for c, v in row.items()
+                                            )
+                                            emb = ai.embed_text(content)
+                                            db.insert_document(
+                                                f"Baris {idx+1} - {f.name}",
+                                                content,
+                                                emb,
+                                                company_id,
+                                                current,
+                                                {"tipe_file": "CSV Data"},
+                                            )
+
+                                    # 2. Plain Text Processing
+                                    elif ext in ["txt", "md"]:
+                                        content = f.getvalue().decode("utf-8")
+                                        chunks = ai.chunk_text(content)
+                                        for idx, chunk in enumerate(chunks):
+                                            emb = ai.embed_text(chunk)
+                                            title = (
+                                                f.name
+                                                if len(chunks) == 1
+                                                else f"{f.name} (Part {idx+1})"
+                                            )
+                                            db.insert_document(
+                                                title,
+                                                chunk,
+                                                emb,
+                                                company_id,
+                                                current,
+                                                {"tipe_file": "Teks"},
+                                            )
+
+                                    # 3. PDF Processing (Multimodal to text)
+                                    elif ext == "pdf":
+                                        temp = f"temp_{f.name}"
+                                        with open(temp, "wb") as file:
+                                            file.write(f.getbuffer())
+                                        content = ai.extract_multimodal(
+                                            temp, "application/pdf", f.name
                                         )
-                                        emb = ai.embed_text(content)
-                                        db.insert_document(
-                                            f"Baris {idx+1} - {f.name}",
-                                            content,
-                                            emb,
-                                            company_id,
-                                            current,
-                                            {"tipe_file": "CSV Data"},
-                                        )
-                                elif ext in ["mp4", "mp3", "mov", "wav"]:
-                                    temp = f"temp_{f.name}"
-                                    try:
+                                        chunks = ai.chunk_text(content)
+                                        for idx, chunk in enumerate(chunks):
+                                            emb = ai.embed_text(chunk)
+                                            title = (
+                                                f.name
+                                                if len(chunks) == 1
+                                                else f"{f.name} (Part {idx+1})"
+                                            )
+                                            db.insert_document(
+                                                title,
+                                                chunk,
+                                                emb,
+                                                company_id,
+                                                current,
+                                                {"tipe_file": "Dokumen PDF"},
+                                            )
+                                        if os.path.exists(temp):
+                                            os.remove(temp)
+
+                                    # 4. Media Processing (Audio/Video)
+                                    elif ext in ["mp4", "mp3", "mov", "wav"]:
+                                        temp = f"temp_{f.name}"
                                         with open(temp, "wb") as file:
                                             file.write(f.getbuffer())
                                         mime = (
@@ -499,24 +579,48 @@ def file_manager_page():
                                         content = ai.extract_multimodal(
                                             temp, mime, f.name
                                         )
-                                        emb = ai.embed_text(content)
-                                        db.insert_document(
-                                            f.name,
-                                            content,
-                                            emb,
-                                            company_id,
-                                            current,
-                                            {"tipe_file": "Media Transkrip"},
-                                        )
-                                    finally:
+                                        chunks = ai.chunk_text(content)
+                                        for idx, chunk in enumerate(chunks):
+                                            emb = ai.embed_text(chunk)
+                                            title = (
+                                                f.name
+                                                if len(chunks) == 1
+                                                else f"{f.name} (Part {idx+1})"
+                                            )
+                                            db.insert_document(
+                                                title,
+                                                chunk,
+                                                emb,
+                                                company_id,
+                                                current,
+                                                {"tipe_file": "Media Transkrip"},
+                                            )
                                         if os.path.exists(temp):
                                             os.remove(temp)
-                                else:
-                                    st.warning(
-                                        f"Format {ext} belum didukung (termasuk PDF)."
-                                    )
-                        flash(f"{len(uploaded_files)} file diproses ke {current}.")
-                        st.rerun(scope="fragment")
+
+                                    else:
+                                        error_logs.append(
+                                            f"{f.name}: Format tidak didukung."
+                                        )
+                                        continue
+
+                                    success_count += 1
+
+                                except Exception as e:
+                                    error_logs.append(f"{f.name}: {str(e)}")
+                                    # Pastikan temp file dihapus jika gagal di tengah jalan
+                                    if "temp" in locals() and os.path.exists(temp):
+                                        os.remove(temp)
+
+                        # Hentikan layar dan paksa baca error jika ada kegagalan
+                        if error_logs:
+                            for msg in error_logs:
+                                st.error(msg)
+
+                        if success_count > 0:
+                            flash(f"{success_count} file berhasil masuk ke {current}.")
+                            if not error_logs:  # Hanya refresh otomatis jika 100% mulus
+                                st.rerun(scope="fragment")
 
     st.divider()
 

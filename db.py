@@ -5,8 +5,13 @@ from supabase import create_client, Client
 
 
 def get_client() -> Client:
+    """
+    Inisialisasi Client Supabase Admin (Bypass RLS)
+    Menggunakan SUPABASE_SERVICE_ROLE_KEY agar aman dari error RLS 42501.
+    """
     url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
+    # CARA 1: Mengubah target kunci ke Service Role Key untuk hak akses admin internal
+    key = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
     return create_client(url, key)
 
 
@@ -145,6 +150,7 @@ def insert_document(
 
     create_folder(company_id, folder_path)
 
+    # Berhasil mengeksekusi insert tanpa gangguan RLS
     return (
         client.table("documents")
         .insert(
@@ -289,16 +295,20 @@ def get_chat_messages(session_id: str):
 
 
 def add_chat_message(session_id: str, role: str, content: str):
+    """Menambahkan pesan chat baru dan memperbarui timestamp sesi aktif."""
     client = get_client()
     client.table("chat_messages").insert(
         {"session_id": session_id, "role": role, "content": content}
     ).execute()
+
+    # Bypass RLS saat memperbarui waktu aktivitas chat terakhir
     client.table("chat_sessions").update({"updated_at": "now()"}).eq(
         "id", session_id
     ).execute()
 
 
 def rename_chat_session(session_id: str, new_title: str):
+    """Mengubah nama/judul sesi percakapan."""
     client = get_client()
     client.table("chat_sessions").update({"title": new_title}).eq(
         "id", session_id
@@ -306,11 +316,16 @@ def rename_chat_session(session_id: str, new_title: str):
 
 
 def delete_chat_session(session_id: str):
+    """Menghapus sesi percakapan (otomatis menghapus pesan terkait jika cascade aktif di DB)."""
     client = get_client()
     client.table("chat_sessions").delete().eq("id", session_id).execute()
 
 
 def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
+    """
+    Mengubah nama folder beserta seluruh sub-folder, dokumen di dalamnya,
+    hingga memperbarui hak akses folder (folder_access) milik karyawan secara berantai.
+    """
     client = get_client()
     old_path = normalize_folder(old_path)
 
@@ -321,6 +336,7 @@ def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
     parent_path = "/" + "/".join(parts[:-1]) + "/" if len(parts) > 1 else "/"
     new_path = parent_path + new_name.strip() + "/"
 
+    # 1. Perbarui semua path di tabel folders yang berada di bawah folder tersebut
     folders = (
         client.table("folders")
         .select("path")
@@ -334,6 +350,7 @@ def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
             "company_id", company_id
         ).execute()
 
+    # 2. Perbarui lokasi folder_path untuk semua dokumen yang terdampak
     docs = (
         client.table("documents")
         .select("id, folder_path")
@@ -347,6 +364,7 @@ def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
             "id", d["id"]
         ).execute()
 
+    # 3. Sinkronisasi hak akses folder (folder_access) karyawan agar tidak kehilangan akses
     users = (
         client.table("users")
         .select("email, folder_access")

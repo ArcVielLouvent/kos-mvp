@@ -32,13 +32,18 @@ st.markdown(
             --kos-radius: 8px;
         }
 
-        /* Sembunyikan header & menu bawaan Streamlit -> navbar custom kita yang tampil */
-        header[data-testid="stHeader"] { display: none !important; }
+        /* Header bawaan Streamlit dibuat TRANSPARAN, bukan disembunyikan total --
+           supaya tombol buka/tutup sidebar di HP tetap berfungsi. Cuma menu titik-tiga
+           dan footer yang disembunyikan lewat selector resmi Streamlit. */
+        header[data-testid="stHeader"] {
+            background: transparent !important;
+            box-shadow: none !important;
+        }
         #MainMenu { visibility: hidden; }
         footer { visibility: hidden; }
 
         .block-container {
-            padding-top: var(--kos-4) !important;
+            padding-top: 3.75rem !important;
             padding-bottom: var(--kos-5) !important;
             max-width: 1180px;
         }

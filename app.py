@@ -32,8 +32,13 @@ st.markdown(
             --kos-radius: 8px;
         }
 
+        /* Sembunyikan header & menu bawaan Streamlit -> navbar custom kita yang tampil */
+        header[data-testid="stHeader"] { display: none !important; }
+        #MainMenu { visibility: hidden; }
+        footer { visibility: hidden; }
+
         .block-container {
-            padding-top: var(--kos-5) !important;
+            padding-top: var(--kos-4) !important;
             padding-bottom: var(--kos-5) !important;
             max-width: 1180px;
         }
@@ -170,8 +175,7 @@ def landing_page():
 
             if st.session_state.auth_view == "login":
                 login_email = st.text_input("Email", key="log_email")
-                login_pass = st.text_input(
-                    "Password", type="password", key="log_pass")
+                login_pass = st.text_input("Password", type="password", key="log_pass")
                 st.write("")
                 if st.button(
                     "Login workspace",
@@ -218,8 +222,7 @@ def landing_page():
                 ):
                     if reg_company and reg_email and reg_pass:
                         try:
-                            db.register_company(
-                                reg_company, reg_email, reg_pass)
+                            db.register_company(reg_company, reg_email, reg_pass)
                             st.success("Berhasil didaftarkan. Silakan login.")
                         except ValueError as e:
                             st.error(str(e))
@@ -237,8 +240,7 @@ def force_password_change():
     with col2:
         with st.container(border=True):
             st.subheader("Buat password baru")
-            new_pw = st.text_input(
-                "Password baru", type="password", key="new_pw")
+            new_pw = st.text_input("Password baru", type="password", key="new_pw")
             confirm = st.text_input(
                 "Ulangi password", type="password", key="confirm_pw"
             )
@@ -262,8 +264,7 @@ def force_password_change():
 # ==========================================
 def render_navbar():
     with st.container(key="kos-navbar"):
-        company_name = st.session_state.user.get(
-            "company_name") or "Perusahaan"
+        company_name = st.session_state.user.get("company_name") or "Perusahaan"
         st.markdown(
             f"<h4 style='margin:0;'>{company_name}</h4>", unsafe_allow_html=True
         )
@@ -279,8 +280,7 @@ def sidebar_nav(options: list, icons: list, current_menu: str):
             menu_title=None,
             options=options,
             icons=icons,
-            default_index=options.index(
-                current_menu) if current_menu in options else 0,
+            default_index=options.index(current_menu) if current_menu in options else 0,
             styles={
                 "container": {"padding": "0", "background-color": "transparent"},
                 "icon": {"font-size": "15px", "color": "#71717a"},
@@ -291,8 +291,7 @@ def sidebar_nav(options: list, icons: list, current_menu: str):
 
         if selected == "Chat KOS":
             st.divider()
-            st.markdown("<p class='kos-label'>Riwayat</p>",
-                        unsafe_allow_html=True)
+            st.markdown("<p class='kos-label'>Riwayat</p>", unsafe_allow_html=True)
             if st.button("Chat baru", use_container_width=True, icon=":material/add:"):
                 st.session_state.current_session_id = None
                 st.rerun()
@@ -334,8 +333,7 @@ def sidebar_nav(options: list, icons: list, current_menu: str):
         # --- Panel akun, selalu di paling bawah sidebar ---
         with st.container(key="kos-sidebar-account"):
             user_name = (
-                st.session_state.user["email"].split(
-                    "@")[0].replace(".", " ").title()
+                st.session_state.user["email"].split("@")[0].replace(".", " ").title()
             )
             with st.popover(
                 user_name, use_container_width=True, icon=":material/account_circle:"
@@ -360,8 +358,7 @@ def chat_page():
     user_name = user["email"].split("@")[0].replace(".", " ").title()
 
     if not st.session_state.current_session_id:
-        st.markdown(
-            f"<h3>Selamat datang, {user_name}</h3>", unsafe_allow_html=True)
+        st.markdown(f"<h3>Selamat datang, {user_name}</h3>", unsafe_allow_html=True)
         st.caption(
             f"Ruang kerja aktif: {user['folder_access']} · AI hanya mencari dokumen di dalam folder Anda"
         )
@@ -379,11 +376,9 @@ def chat_page():
             st.session_state.current_session_id = db.create_chat_session(
                 user["email"], user["company_id"]
             )
-            db.rename_chat_session(
-                st.session_state.current_session_id, question[:30])
+            db.rename_chat_session(st.session_state.current_session_id, question[:30])
 
-        db.add_chat_message(
-            st.session_state.current_session_id, "user", question)
+        db.add_chat_message(st.session_state.current_session_id, "user", question)
         with st.chat_message("user"):
             st.write(question)
 
@@ -472,8 +467,7 @@ def file_manager_page():
                 new_name = st.text_input("Nama folder")
                 if st.button("Buat", type="primary", key="btn_create_folder"):
                     if new_name.strip():
-                        db.create_folder(company_id, current +
-                                         new_name.strip() + "/")
+                        db.create_folder(company_id, current + new_name.strip() + "/")
                         flash(f"Folder '{new_name.strip()}' dibuat.")
                         st.rerun(scope="fragment")
         with col_b:
@@ -613,8 +607,7 @@ def file_manager_page():
                                 st.error(msg)
 
                         if success_count > 0:
-                            flash(
-                                f"{success_count} file berhasil masuk ke {current}.")
+                            flash(f"{success_count} file berhasil masuk ke {current}.")
                             if not error_logs:
                                 st.rerun(scope="fragment")
 
@@ -653,8 +646,7 @@ def file_manager_page():
                             if st.button(
                                 "Simpan", key=f"sv_{child}", icon=":material/save:"
                             ):
-                                db.rename_folder_cascade(
-                                    company_id, child, rn_name)
+                                db.rename_folder_cascade(company_id, child, rn_name)
                                 st.rerun(scope="fragment")
                             st.divider()
                             if st.button(
@@ -663,8 +655,7 @@ def file_manager_page():
                                 type="primary",
                                 icon=":material/delete:",
                             ):
-                                db.delete_folder_and_contents(
-                                    company_id, child)
+                                db.delete_folder_and_contents(company_id, child)
                                 st.rerun(scope="fragment")
 
     if docs:
@@ -672,8 +663,7 @@ def file_manager_page():
         with st.container(key="kos-row"):
             for d in docs:
                 title_short = (
-                    d["title"] if len(
-                        d["title"]) <= 46 else d["title"][:46] + "..."
+                    d["title"] if len(d["title"]) <= 46 else d["title"][:46] + "..."
                 )
                 row = st.columns([7, 2, 1], vertical_alignment="center")
                 with row[0]:
@@ -713,6 +703,52 @@ def file_manager_page():
 
 
 # ==========================================
+# TREE PICKER FOLDER (dipakai untuk memilih akses karyawan)
+# ==========================================
+def folder_picker(company_id: str, key_prefix: str) -> str:
+    """Navigasi klik-masuk folder (bukan dropdown datar) untuk memilih 1 folder tujuan."""
+    state_key = f"{key_prefix}_browse_path"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = "/"
+
+    current = st.session_state[state_key]
+
+    parts = [p for p in current.strip("/").split("/") if p]
+    with st.container(key="kos-crumb"):
+        cols = st.columns(len(parts) + 1, gap="small")
+        with cols[0]:
+            if st.button("Drive", key=f"{key_prefix}_root", icon=":material/home:"):
+                st.session_state[state_key] = "/"
+                st.rerun()
+        accum = "/"
+        for i, part in enumerate(parts):
+            accum += part + "/"
+            with cols[i + 1]:
+                if st.button(part, key=f"{key_prefix}_crumb_{i}"):
+                    st.session_state[state_key] = accum
+                    st.rerun()
+
+    children = db.list_child_folders(company_id, current)
+
+    if children:
+        with st.container(key="kos-row"):
+            for child in children:
+                name = child.rstrip("/").split("/")[-1]
+                if st.button(
+                    name, key=f"{key_prefix}_nav_{child}",
+                    icon=":material/folder:", use_container_width=True,
+                ):
+                    st.session_state[state_key] = child
+                    st.rerun()
+    else:
+        st.caption("Tidak ada sub-folder di sini.")
+
+    st.divider()
+    st.caption(f"Folder terpilih: `{current}`")
+    return current
+
+
+# ==========================================
 # MANAJEMEN TIM
 # ==========================================
 def admin_employee_management():
@@ -721,13 +757,10 @@ def admin_employee_management():
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        emails_text = st.text_area(
-            "Daftar email karyawan (pisahkan baris)", height=150)
+        emails_text = st.text_area("Daftar email karyawan (pisahkan baris)", height=150)
     with col2:
-        folders = db.get_unique_folders(company_id)
-        selected_folder = st.selectbox("Pilih akses folder utama", folders)
-        new_folder = st.text_input("Atau ketik manual (contoh: /Finance/)")
-        final_folder = new_folder if new_folder else selected_folder
+        st.caption("Telusuri folder tujuan akses")
+        final_folder = folder_picker(company_id, key_prefix="emp_picker")
 
     if st.button("Daftarkan sekarang", type="primary", icon=":material/person_add:"):
         email_list = re.findall(
@@ -738,8 +771,7 @@ def admin_employee_management():
             st.success(f"{len(temp)} karyawan ditambahkan ke {final_folder}.")
             st.dataframe(
                 pd.DataFrame(
-                    [{"Email": e, "Password sementara": p}
-                        for e, p in temp.items()]
+                    [{"Email": e, "Password sementara": p} for e, p in temp.items()]
                 ),
                 use_container_width=True,
             )

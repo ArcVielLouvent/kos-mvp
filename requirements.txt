@@ -1,6 +1,6 @@
 streamlit
 streamlit-option-menu
 supabase
-google-generativeai
+google-genai
 bcrypt
 pandas

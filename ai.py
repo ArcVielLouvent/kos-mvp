@@ -10,6 +10,30 @@ def get_client() -> genai.Client:
     return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 
+def _call_with_retry(func, *args, max_retries: int = 4, base_delay: int = 3, **kwargs):
+    """
+    Coba ulang otomatis kalau kena error transient dari server Google
+    (503 UNAVAILABLE / 429 rate limit) -- bukan bug di kode, murni server
+    Google sedang sibuk. Backoff: 3s, 6s, 12s, 24s.
+    """
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+            is_transient = any(
+                code in error_str for code in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"]
+            )
+            if is_transient and attempt < max_retries - 1:
+                wait = base_delay * (2 ** attempt)
+                time.sleep(wait)
+                continue
+            raise
+    raise last_error
+
+
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list:
     """Sistem pemotong teks (Chunking) untuk mencegah Limit Token"""
     if not text:
@@ -44,7 +68,8 @@ def embed_text(text: str) -> list:
     client = get_client()
     model_name = get_embedding_model()
 
-    result = client.models.embed_content(
+    result = _call_with_retry(
+        client.models.embed_content,
         model=model_name,
         contents=text,
         config=types.EmbedContentConfig(output_dimensionality=768),
@@ -77,7 +102,8 @@ Jika jawaban tidak ada di dalam dokumen referensi, katakan jujur bahwa informasi
 Pertanyaan: {question}
 """
     model_name = get_generation_model()
-    response = client.models.generate_content(
+    response = _call_with_retry(
+        client.models.generate_content,
         model=model_name,
         contents=prompt,
     )
@@ -93,7 +119,7 @@ def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str
     client = get_client()
 
     try:
-        uploaded_file = client.files.upload(file=file_path)
+        uploaded_file = _call_with_retry(client.files.upload, file=file_path)
 
         # Polling anti-halusinasi: tunggu sampai file benar-benar siap diproses
         while uploaded_file.state.name == "PROCESSING":
@@ -132,7 +158,8 @@ def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str
             prompt = "Ekstrak seluruh informasi dari file ini menjadi teks terstruktur murni."
 
         model_name = get_generation_model()
-        response = client.models.generate_content(
+        response = _call_with_retry(
+            client.models.generate_content,
             model=model_name,
             contents=[uploaded_file, prompt],
         )

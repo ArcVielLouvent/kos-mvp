@@ -4,3 +4,7 @@ supabase
 google-genai
 bcrypt
 pandas
+python-docx
+python-pptx
+openpyxl
+striprtf

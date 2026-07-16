@@ -1,4 +1,5 @@
 import os
+import time
 from google import genai
 from google.genai import types
 import streamlit as st
@@ -85,41 +86,134 @@ Pertanyaan: {question}
 
 def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str:
     """
-    MENGGUNAKAN NATIVE GEMINI FILE API (Ringan, Tanpa Memori Server Lokal).
-    Menyerahkan tugas pembacaan PDF sepenuhnya ke server Google Cloud secara gratis.
+    Ekstraksi PDF, audio, dan video via Gemini File API (SDK google-genai).
+    File diupload ke Google Cloud, dipoll sampai status ACTIVE (anti-halusinasi),
+    lalu dihapus dari server setelah selesai.
     """
-    if "pdf" not in mime_type:
-        raise ValueError(
-            "Ekstraksi non-PDF memerlukan metode penanganan biner yang berbeda."
-        )
+    client = get_client()
 
     try:
-        client = get_client()
-
-        # 1. Unggah file langsung ke staging area cloud Google Gemini (Mendukung hingga 2GB)
         uploaded_file = client.files.upload(file=file_path)
 
-        # 2. Berikan instruksi pembacaan teks terstruktur
-        prompt = "Baca seluruh dokumen PDF ini dengan saksama dan ekstrak seluruh teks serta tabel menjadi teks terstruktur murni."
-        model_name = get_generation_model()
+        # Polling anti-halusinasi: tunggu sampai file benar-benar siap diproses
+        while uploaded_file.state.name == "PROCESSING":
+            time.sleep(3)
+            uploaded_file = client.files.get(name=uploaded_file.name)
 
-        # 3. Model Gemini melakukan OCR secara cloud dan mengembalikan hasilnya
+        if uploaded_file.state.name == "FAILED":
+            try:
+                client.files.delete(name=uploaded_file.name)
+            except Exception:
+                pass
+            raise ValueError(
+                f"Google Gemini gagal memproses file '{display_name}'.")
+
+        if "pdf" in mime_type:
+            prompt = (
+                "Baca seluruh dokumen PDF ini dengan saksama dan ekstrak seluruh "
+                "teks serta tabel menjadi teks terstruktur murni."
+            )
+        elif "video" in mime_type:
+            prompt = (
+                "Tonton video ini dari awal hingga akhir. Buatkan transkrip sangat detail, "
+                "termasuk kejadian visual, langkah-langkah teknis yang ditunjukkan, "
+                "dan teks apa pun yang muncul di layar."
+            )
+        elif "audio" in mime_type:
+            prompt = "Dengarkan audio ini dengan saksama dan buatkan transkrip teks yang lengkap dan akurat."
+        elif "image" in mime_type:
+            prompt = (
+                "Amati gambar ini dengan saksama. Jika ada teks di dalamnya (dokumen yang "
+                "difoto, poster, papan tulis, tangkapan layar), transkrip teksnya secara "
+                "lengkap dan akurat. Jika ini foto biasa tanpa teks, deskripsikan isinya "
+                "secara detail dan faktual."
+            )
+        else:
+            prompt = "Ekstrak seluruh informasi dari file ini menjadi teks terstruktur murni."
+
+        model_name = get_generation_model()
         response = client.models.generate_content(
-            model=model_name, contents=[uploaded_file, prompt]
+            model=model_name,
+            contents=[uploaded_file, prompt],
         )
 
-        # 4. Bersihkan file dari server Google demi privasi data
         try:
             client.files.delete(name=uploaded_file.name)
         except Exception:
             pass
 
         hasil_teks = response.text
-
         if not hasil_teks or not hasil_teks.strip():
-            raise ValueError("Tidak ada teks yang bisa dibaca dari dokumen PDF ini.")
+            raise ValueError(
+                f"Tidak ada teks yang bisa diekstrak dari '{display_name}'.")
 
         return hasil_teks
 
     except Exception as e:
-        raise RuntimeError(f"Gagal mengekstrak PDF via Google File API: {str(e)}")
+        raise RuntimeError(
+            f"Gagal mengekstrak '{display_name}' via Google File API: {str(e)}")
+
+
+# ==========================================
+# EKSTRAKSI LOKAL (DOCX / PPTX / XLSX)
+# Tidak lewat Gemini -- dokumen office tidak dipahami baik oleh document vision
+# ==========================================
+def extract_docx_text(file_path: str) -> str:
+    from docx import Document
+
+    doc = Document(file_path)
+    parts = [p.text for p in doc.paragraphs if p.text.strip()]
+
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = " | ".join(cell.text for cell in row.cells)
+            if row_text.strip():
+                parts.append(row_text)
+
+    return "\n".join(parts)
+
+
+def extract_pptx_text(file_path: str) -> str:
+    from pptx import Presentation
+
+    prs = Presentation(file_path)
+    slides = []
+
+    for i, slide in enumerate(prs.slides, start=1):
+        texts = []
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    text = "".join(run.text for run in para.runs)
+                    if text.strip():
+                        texts.append(text)
+        if texts:
+            slides.append(f"Slide {i}:\n" + "\n".join(texts))
+
+    return "\n\n".join(slides)
+
+
+def extract_xlsx_text(file_path: str) -> str:
+    import openpyxl
+
+    wb = openpyxl.load_workbook(file_path, data_only=True)
+    sheets = []
+
+    for sheet in wb.worksheets:
+        rows = []
+        for row in sheet.iter_rows(values_only=True):
+            if any(cell is not None for cell in row):
+                rows.append(" | ".join(
+                    str(c) if c is not None else "" for c in row))
+        if rows:
+            sheets.append(f"Sheet: {sheet.title}\n" + "\n".join(rows))
+
+    return "\n\n".join(sheets)
+
+
+def extract_rtf_text(file_path: str) -> str:
+    from striprtf.striprtf import rtf_to_text
+
+    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+        raw = f.read()
+    return rtf_to_text(raw)

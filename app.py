@@ -175,7 +175,8 @@ def landing_page():
 
             if st.session_state.auth_view == "login":
                 login_email = st.text_input("Email", key="log_email")
-                login_pass = st.text_input("Password", type="password", key="log_pass")
+                login_pass = st.text_input(
+                    "Password", type="password", key="log_pass")
                 st.write("")
                 if st.button(
                     "Login workspace",
@@ -222,7 +223,8 @@ def landing_page():
                 ):
                     if reg_company and reg_email and reg_pass:
                         try:
-                            db.register_company(reg_company, reg_email, reg_pass)
+                            db.register_company(
+                                reg_company, reg_email, reg_pass)
                             st.success("Berhasil didaftarkan. Silakan login.")
                         except ValueError as e:
                             st.error(str(e))
@@ -240,7 +242,8 @@ def force_password_change():
     with col2:
         with st.container(border=True):
             st.subheader("Buat password baru")
-            new_pw = st.text_input("Password baru", type="password", key="new_pw")
+            new_pw = st.text_input(
+                "Password baru", type="password", key="new_pw")
             confirm = st.text_input(
                 "Ulangi password", type="password", key="confirm_pw"
             )
@@ -264,7 +267,8 @@ def force_password_change():
 # ==========================================
 def render_navbar():
     with st.container(key="kos-navbar"):
-        company_name = st.session_state.user.get("company_name") or "Perusahaan"
+        company_name = st.session_state.user.get(
+            "company_name") or "Perusahaan"
         st.markdown(
             f"<h4 style='margin:0;'>{company_name}</h4>", unsafe_allow_html=True
         )
@@ -280,7 +284,8 @@ def sidebar_nav(options: list, icons: list, current_menu: str):
             menu_title=None,
             options=options,
             icons=icons,
-            default_index=options.index(current_menu) if current_menu in options else 0,
+            default_index=options.index(
+                current_menu) if current_menu in options else 0,
             styles={
                 "container": {"padding": "0", "background-color": "transparent"},
                 "icon": {"font-size": "15px", "color": "#71717a"},
@@ -291,7 +296,8 @@ def sidebar_nav(options: list, icons: list, current_menu: str):
 
         if selected == "Chat KOS":
             st.divider()
-            st.markdown("<p class='kos-label'>Riwayat</p>", unsafe_allow_html=True)
+            st.markdown("<p class='kos-label'>Riwayat</p>",
+                        unsafe_allow_html=True)
             if st.button("Chat baru", use_container_width=True, icon=":material/add:"):
                 st.session_state.current_session_id = None
                 st.rerun()
@@ -333,7 +339,8 @@ def sidebar_nav(options: list, icons: list, current_menu: str):
         # --- Panel akun, selalu di paling bawah sidebar ---
         with st.container(key="kos-sidebar-account"):
             user_name = (
-                st.session_state.user["email"].split("@")[0].replace(".", " ").title()
+                st.session_state.user["email"].split(
+                    "@")[0].replace(".", " ").title()
             )
             with st.popover(
                 user_name, use_container_width=True, icon=":material/account_circle:"
@@ -358,7 +365,8 @@ def chat_page():
     user_name = user["email"].split("@")[0].replace(".", " ").title()
 
     if not st.session_state.current_session_id:
-        st.markdown(f"<h3>Selamat datang, {user_name}</h3>", unsafe_allow_html=True)
+        st.markdown(
+            f"<h3>Selamat datang, {user_name}</h3>", unsafe_allow_html=True)
         st.caption(
             f"Ruang kerja aktif: {user['folder_access']} · AI hanya mencari dokumen di dalam folder Anda"
         )
@@ -376,9 +384,11 @@ def chat_page():
             st.session_state.current_session_id = db.create_chat_session(
                 user["email"], user["company_id"]
             )
-            db.rename_chat_session(st.session_state.current_session_id, question[:30])
+            db.rename_chat_session(
+                st.session_state.current_session_id, question[:30])
 
-        db.add_chat_message(st.session_state.current_session_id, "user", question)
+        db.add_chat_message(
+            st.session_state.current_session_id, "user", question)
         with st.chat_message("user"):
             st.write(question)
 
@@ -420,6 +430,16 @@ def file_type_icon(metadata: dict) -> str:
         return ":material/videocam:"
     if tipe == "Dokumen PDF":
         return ":material/picture_as_pdf:"
+    if tipe == "Dokumen Word":
+        return ":material/article:"
+    if tipe == "Presentasi":
+        return ":material/slideshow:"
+    if tipe == "Spreadsheet":
+        return ":material/table_chart:"
+    if tipe == "Gambar":
+        return ":material/image:"
+    if tipe == "Dokumen RTF":
+        return ":material/description:"
     return ":material/description:"
 
 
@@ -467,7 +487,8 @@ def file_manager_page():
                 new_name = st.text_input("Nama folder")
                 if st.button("Buat", type="primary", key="btn_create_folder"):
                     if new_name.strip():
-                        db.create_folder(company_id, current + new_name.strip() + "/")
+                        db.create_folder(company_id, current +
+                                         new_name.strip() + "/")
                         flash(f"Folder '{new_name.strip()}' dibuat.")
                         st.rerun(scope="fragment")
         with col_b:
@@ -475,7 +496,7 @@ def file_manager_page():
                 "Upload file", use_container_width=True, icon=":material/upload_file:"
             ):
                 uploaded_files = st.file_uploader(
-                    "Pilih file (PDF, TXT, MD, CSV, Audio, Video)",
+                    "Pilih file (Dokumen, Gambar, Audio, Video, atau teks apa pun)",
                     accept_multiple_files=True,
                     label_visibility="collapsed",
                 )
@@ -509,8 +530,11 @@ def file_manager_page():
                                             )
                                             time.sleep(0.5)
 
-                                    elif ext in ["txt", "md"]:
-                                        content = f.getvalue().decode("utf-8")
+                                    elif ext in [
+                                        "txt", "md", "json", "xml",
+                                        "html", "htm", "yaml", "yml", "log",
+                                    ]:
+                                        content = f.getvalue().decode("utf-8", errors="ignore")
                                         chunks = ai.chunk_text(content)
                                         for idx, chunk in enumerate(chunks):
                                             emb = ai.embed_text(chunk)
@@ -528,6 +552,31 @@ def file_manager_page():
                                                 {"tipe_file": "Teks"},
                                             )
                                             time.sleep(0.5)
+
+                                    elif ext == "rtf":
+                                        temp = f"temp_{f.name}"
+                                        with open(temp, "wb") as file:
+                                            file.write(f.getbuffer())
+                                        content = ai.extract_rtf_text(temp)
+                                        chunks = ai.chunk_text(content)
+                                        for idx, chunk in enumerate(chunks):
+                                            emb = ai.embed_text(chunk)
+                                            title = (
+                                                f.name
+                                                if len(chunks) == 1
+                                                else f"{f.name} (Part {idx+1})"
+                                            )
+                                            db.insert_document(
+                                                title,
+                                                chunk,
+                                                emb,
+                                                company_id,
+                                                current,
+                                                {"tipe_file": "Dokumen RTF"},
+                                            )
+                                            time.sleep(0.5)
+                                        if os.path.exists(temp):
+                                            os.remove(temp)
 
                                     elif ext == "pdf":
                                         temp = f"temp_{f.name}"
@@ -556,15 +605,146 @@ def file_manager_page():
                                         if os.path.exists(temp):
                                             os.remove(temp)
 
-                                    elif ext in ["mp4", "mp3", "mov", "wav"]:
+                                    elif ext == "docx":
                                         temp = f"temp_{f.name}"
                                         with open(temp, "wb") as file:
                                             file.write(f.getbuffer())
-                                        mime = (
-                                            "video/mp4"
-                                            if ext in ["mp4", "mov"]
-                                            else "audio/mp3"
+                                        content = ai.extract_docx_text(temp)
+                                        chunks = ai.chunk_text(content)
+                                        for idx, chunk in enumerate(chunks):
+                                            emb = ai.embed_text(chunk)
+                                            title = (
+                                                f.name
+                                                if len(chunks) == 1
+                                                else f"{f.name} (Part {idx+1})"
+                                            )
+                                            db.insert_document(
+                                                title,
+                                                chunk,
+                                                emb,
+                                                company_id,
+                                                current,
+                                                {"tipe_file": "Dokumen Word"},
+                                            )
+                                            time.sleep(0.5)
+                                        if os.path.exists(temp):
+                                            os.remove(temp)
+
+                                    elif ext == "pptx":
+                                        temp = f"temp_{f.name}"
+                                        with open(temp, "wb") as file:
+                                            file.write(f.getbuffer())
+                                        content = ai.extract_pptx_text(temp)
+                                        chunks = ai.chunk_text(content)
+                                        for idx, chunk in enumerate(chunks):
+                                            emb = ai.embed_text(chunk)
+                                            title = (
+                                                f.name
+                                                if len(chunks) == 1
+                                                else f"{f.name} (Part {idx+1})"
+                                            )
+                                            db.insert_document(
+                                                title,
+                                                chunk,
+                                                emb,
+                                                company_id,
+                                                current,
+                                                {"tipe_file": "Presentasi"},
+                                            )
+                                            time.sleep(0.5)
+                                        if os.path.exists(temp):
+                                            os.remove(temp)
+
+                                    elif ext == "xlsx":
+                                        temp = f"temp_{f.name}"
+                                        with open(temp, "wb") as file:
+                                            file.write(f.getbuffer())
+                                        content = ai.extract_xlsx_text(temp)
+                                        chunks = ai.chunk_text(content)
+                                        for idx, chunk in enumerate(chunks):
+                                            emb = ai.embed_text(chunk)
+                                            title = (
+                                                f.name
+                                                if len(chunks) == 1
+                                                else f"{f.name} (Part {idx+1})"
+                                            )
+                                            db.insert_document(
+                                                title,
+                                                chunk,
+                                                emb,
+                                                company_id,
+                                                current,
+                                                {"tipe_file": "Spreadsheet"},
+                                            )
+                                            time.sleep(0.5)
+                                        if os.path.exists(temp):
+                                            os.remove(temp)
+
+                                    elif ext in [
+                                        "jpg", "jpeg", "png", "webp",
+                                        "gif", "bmp", "heic", "heif",
+                                    ]:
+                                        temp = f"temp_{f.name}"
+                                        with open(temp, "wb") as file:
+                                            file.write(f.getbuffer())
+                                        image_mime = {
+                                            "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                                            "png": "image/png", "webp": "image/webp",
+                                            "gif": "image/gif", "bmp": "image/bmp",
+                                            "heic": "image/heic", "heif": "image/heif",
+                                        }
+                                        content = ai.extract_multimodal(
+                                            temp, image_mime[ext], f.name
                                         )
+                                        chunks = ai.chunk_text(content)
+                                        for idx, chunk in enumerate(chunks):
+                                            emb = ai.embed_text(chunk)
+                                            title = (
+                                                f.name
+                                                if len(chunks) == 1
+                                                else f"{f.name} (Part {idx+1})"
+                                            )
+                                            db.insert_document(
+                                                title,
+                                                chunk,
+                                                emb,
+                                                company_id,
+                                                current,
+                                                {"tipe_file": "Gambar"},
+                                            )
+                                            time.sleep(0.5)
+                                        if os.path.exists(temp):
+                                            os.remove(temp)
+
+                                    elif ext == "doc":
+                                        error_logs.append(
+                                            f"{f.name}: Format .doc lama belum didukung, "
+                                            "simpan ulang sebagai .docx terlebih dahulu."
+                                        )
+                                        continue
+
+                                    elif ext in [
+                                        "mp4", "mov", "avi", "flv",
+                                        "mpeg", "mpg", "webm", "wmv", "3gp",
+                                        "mp3", "wav", "aiff", "aac", "ogg", "flac",
+                                    ]:
+                                        temp = f"temp_{f.name}"
+                                        with open(temp, "wb") as file:
+                                            file.write(f.getbuffer())
+                                        video_mime = {
+                                            "mp4": "video/mp4", "mov": "video/quicktime",
+                                            "avi": "video/x-msvideo", "flv": "video/x-flv",
+                                            "mpeg": "video/mpeg", "mpg": "video/mpeg",
+                                            "webm": "video/webm", "wmv": "video/x-ms-wmv",
+                                            "3gp": "video/3gpp",
+                                        }
+                                        audio_mime = {
+                                            "mp3": "audio/mp3", "wav": "audio/wav",
+                                            "aiff": "audio/aiff", "aac": "audio/aac",
+                                            "ogg": "audio/ogg", "flac": "audio/flac",
+                                        }
+                                        mime = video_mime.get(
+                                            ext) or audio_mime.get(ext)
                                         content = ai.extract_multimodal(
                                             temp, mime, f.name
                                         )
@@ -589,10 +769,37 @@ def file_manager_page():
                                             os.remove(temp)
 
                                     else:
-                                        error_logs.append(
-                                            f"{f.name}: Format tidak didukung."
-                                        )
-                                        continue
+                                        # Fallback universal: coba baca sebagai teks
+                                        # sebelum benar-benar menyerah
+                                        try:
+                                            content = f.getvalue().decode("utf-8")
+                                        except UnicodeDecodeError:
+                                            content = ""
+
+                                        if content.strip():
+                                            chunks = ai.chunk_text(content)
+                                            for idx, chunk in enumerate(chunks):
+                                                emb = ai.embed_text(chunk)
+                                                title = (
+                                                    f.name
+                                                    if len(chunks) == 1
+                                                    else f"{f.name} (Part {idx+1})"
+                                                )
+                                                db.insert_document(
+                                                    title,
+                                                    chunk,
+                                                    emb,
+                                                    company_id,
+                                                    current,
+                                                    {"tipe_file": "Teks (format lain)"},
+                                                )
+                                                time.sleep(0.5)
+                                        else:
+                                            error_logs.append(
+                                                f"{f.name}: Format .{ext} tidak dikenali "
+                                                "dan bukan file teks — tidak bisa diproses."
+                                            )
+                                            continue
 
                                     success_count += 1
                                     time.sleep(2)
@@ -607,7 +814,8 @@ def file_manager_page():
                                 st.error(msg)
 
                         if success_count > 0:
-                            flash(f"{success_count} file berhasil masuk ke {current}.")
+                            flash(
+                                f"{success_count} file berhasil masuk ke {current}.")
                             if not error_logs:
                                 st.rerun(scope="fragment")
 
@@ -646,7 +854,8 @@ def file_manager_page():
                             if st.button(
                                 "Simpan", key=f"sv_{child}", icon=":material/save:"
                             ):
-                                db.rename_folder_cascade(company_id, child, rn_name)
+                                db.rename_folder_cascade(
+                                    company_id, child, rn_name)
                                 st.rerun(scope="fragment")
                             st.divider()
                             if st.button(
@@ -655,7 +864,8 @@ def file_manager_page():
                                 type="primary",
                                 icon=":material/delete:",
                             ):
-                                db.delete_folder_and_contents(company_id, child)
+                                db.delete_folder_and_contents(
+                                    company_id, child)
                                 st.rerun(scope="fragment")
 
     if docs:
@@ -663,7 +873,8 @@ def file_manager_page():
         with st.container(key="kos-row"):
             for d in docs:
                 title_short = (
-                    d["title"] if len(d["title"]) <= 46 else d["title"][:46] + "..."
+                    d["title"] if len(
+                        d["title"]) <= 46 else d["title"][:46] + "..."
                 )
                 row = st.columns([7, 2, 1], vertical_alignment="center")
                 with row[0]:
@@ -757,7 +968,8 @@ def admin_employee_management():
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        emails_text = st.text_area("Daftar email karyawan (pisahkan baris)", height=150)
+        emails_text = st.text_area(
+            "Daftar email karyawan (pisahkan baris)", height=150)
     with col2:
         st.caption("Telusuri folder tujuan akses")
         final_folder = folder_picker(company_id, key_prefix="emp_picker")
@@ -771,7 +983,8 @@ def admin_employee_management():
             st.success(f"{len(temp)} karyawan ditambahkan ke {final_folder}.")
             st.dataframe(
                 pd.DataFrame(
-                    [{"Email": e, "Password sementara": p} for e, p in temp.items()]
+                    [{"Email": e, "Password sementara": p}
+                        for e, p in temp.items()]
                 ),
                 use_container_width=True,
             )

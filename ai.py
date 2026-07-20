@@ -5,6 +5,23 @@ from google.genai import types
 import streamlit as st
 
 
+def is_file_request(question: str) -> bool:
+    """
+    Deteksi niat sederhana: apakah user minta FILE ASLI (bukan jawaban teks)?
+    Keyword matching -- gratis & instan, cukup untuk kasus umum. Kalau nanti
+    banyak frasa lolos tak terdeteksi, baru pertimbangkan upgrade ke klasifikasi
+    berbasis AI (butuh 1 API call tambahan, ada biaya & latency).
+    """
+    keywords = [
+        "file asli", "file aslinya", "filenya", "file nya",
+        "download", "unduh", "downloadkan", "unduhkan",
+        "kirim file", "kirimkan file", "berikan file", "kasih file",
+        "dokumen aslinya", "dokumen asli", "dokumennya",
+    ]
+    q = question.lower()
+    return any(kw in q for kw in keywords)
+
+
 def get_client() -> genai.Client:
     """Inisialisasi Client menggunakan SDK google-genai yang mutakhir"""
     return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
@@ -95,6 +112,15 @@ def generate_answer(question: str, context_documents: list) -> str:
 Jawab pertanyaan pengguna HANYA berdasarkan Dokumen Referensi di bawah ini.
 Jika jawaban tidak ada di dalam dokumen referensi, katakan jujur bahwa informasi tersebut belum tersedia di database. Jangan pernah mengarang.
 
+ATURAN KHUSUS UNTUK DATA TABEL (baris berformat "kolom1 | kolom2 | ..."):
+- Jika sumber data berupa tabel/sheet, tampilkan sebagai tabel Markdown (bisa di-copy),
+  BUKAN diringkas atau diparafrasekan dengan kalimat bebas.
+- Salin nilai apa adanya persis seperti di sumber -- jangan mengubah, membulatkan, atau menerka angka.
+- Jika pengguna hanya bertanya sebagian (misal satu baris/kategori tertentu), tampilkan baris relevan
+  saja, tapi tetap dalam format tabel.
+- Jika pengguna eksplisit minta "seluruh data" / "semua isi sheet ini", tampilkan seluruh baris
+  dari sheet yang relevan itu secara lengkap.
+
 === DOKUMEN REFERENSI ===
 {context}
 === AKHIR DOKUMEN ===
@@ -131,8 +157,7 @@ def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str
                 client.files.delete(name=uploaded_file.name)
             except Exception:
                 pass
-            raise ValueError(
-                f"Google Gemini gagal memproses file '{display_name}'.")
+            raise ValueError(f"Google Gemini gagal memproses file '{display_name}'.")
 
         if "pdf" in mime_type:
             prompt = (
@@ -171,14 +196,12 @@ def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str
 
         hasil_teks = response.text
         if not hasil_teks or not hasil_teks.strip():
-            raise ValueError(
-                f"Tidak ada teks yang bisa diekstrak dari '{display_name}'.")
+            raise ValueError(f"Tidak ada teks yang bisa diekstrak dari '{display_name}'.")
 
         return hasil_teks
 
     except Exception as e:
-        raise RuntimeError(
-            f"Gagal mengekstrak '{display_name}' via Google File API: {str(e)}")
+        raise RuntimeError(f"Gagal mengekstrak '{display_name}' via Google File API: {str(e)}")
 
 
 # ==========================================
@@ -220,7 +243,12 @@ def extract_pptx_text(file_path: str) -> str:
     return "\n\n".join(slides)
 
 
-def extract_xlsx_text(file_path: str) -> str:
+def extract_xlsx_text(file_path: str) -> list:
+    """
+    Kembalikan list per-sheet: [(nama_sheet, isi_lengkap_sheet), ...]
+    Sengaja TIDAK digabung jadi satu teks panjang -- supaya tiap sheet
+    tetap utuh sebagai satu chunk, tidak terpotong sembarang karakter.
+    """
     import openpyxl
 
     wb = openpyxl.load_workbook(file_path, data_only=True)
@@ -230,12 +258,18 @@ def extract_xlsx_text(file_path: str) -> str:
         rows = []
         for row in sheet.iter_rows(values_only=True):
             if any(cell is not None for cell in row):
-                rows.append(" | ".join(
-                    str(c) if c is not None else "" for c in row))
+                rows.append(" | ".join(str(c) if c is not None else "" for c in row))
         if rows:
-            sheets.append(f"Sheet: {sheet.title}\n" + "\n".join(rows))
+            sheets.append((sheet.title, "\n".join(rows)))
 
-    return "\n\n".join(sheets)
+    return sheets
+
+
+def format_dataframe_as_text(df, sheet_name: str = "Data") -> str:
+    """Ubah pandas DataFrame (mis. dari CSV) jadi teks tabel utuh, tanpa dipotong per baris."""
+    header = " | ".join(str(c) for c in df.columns)
+    rows = [" | ".join(str(v) for v in row) for row in df.itertuples(index=False)]
+    return f"Sheet: {sheet_name}\n" + header + "\n" + "\n".join(rows)
 
 
 def extract_rtf_text(file_path: str) -> str:

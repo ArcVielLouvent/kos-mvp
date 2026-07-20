@@ -601,13 +601,16 @@ def file_manager_page():
                                         chunks = ai.chunk_text(content)
                                         tipe_file = "Dokumen RTF"
 
-                                    # ---------- PDF (Gemini File API) ----------
+                                    # ---------- PDF: coba lokal dulu (gratis, tanpa kuota) ----------
                                     elif ext == "pdf":
                                         with open(temp, "wb") as file:
                                             file.write(f.getbuffer())
-                                        content = ai.extract_multimodal(
-                                            temp, "application/pdf", f.name
-                                        )
+                                        content = ai.extract_pdf_text_local(temp)
+                                        if len(content.strip()) < 50:
+                                            # Kemungkinan PDF hasil scan/gambar -> fallback Gemini
+                                            content = ai.extract_multimodal(
+                                                temp, "application/pdf", f.name
+                                            )
                                         chunks = ai.chunk_text(content)
                                         tipe_file = "Dokumen PDF"
 

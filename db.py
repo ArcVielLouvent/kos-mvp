@@ -10,7 +10,6 @@ def get_client() -> Client:
     Menggunakan SUPABASE_SERVICE_ROLE_KEY agar aman dari error RLS 42501.
     """
     url = st.secrets["SUPABASE_URL"]
-    # CARA 1: Mengubah target kunci ke Service Role Key untuk hak akses admin internal
     key = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
     return create_client(url, key)
 
@@ -136,35 +135,77 @@ def get_unique_folders(company_id: str) -> list:
 
 
 # ==========================================
-# DOKUMEN & RAG
+# DOKUMEN & RAG (dipisah: 1 dokumen utuh, banyak chunk untuk pencarian)
 # ==========================================
-def insert_document(
+def insert_document_with_chunks(
     title: str,
-    content: str,
-    embedding: list,
+    chunks: list,
+    embeddings: list,
     company_id: str,
     folder_path: str = "/",
     metadata: dict = None,
-):
+    file_bytes: bytes = None,
+    original_filename: str = None,
+) -> str:
+    """
+    Simpan 1 baris di `documents` (file utuh, muncul 1x di File Manager, ada link
+    download kalau file_bytes diisi), lalu simpan tiap chunk sebagai baris terpisah
+    di `document_chunks` (khusus untuk pencarian vector, tidak pernah tampil sebagai
+    "file" terpisah di File Manager).
+    """
     client = get_client()
-
+    folder_path = normalize_folder(folder_path)
     create_folder(company_id, folder_path)
 
-    # Berhasil mengeksekusi insert tanpa gangguan RLS
-    return (
+    file_url = None
+    if file_bytes and original_filename:
+        storage_path = f"{company_id}/{folder_path.strip('/')}/{original_filename}"
+        try:
+            client.storage.from_("company-files").upload(
+                storage_path, file_bytes, {"upsert": "true"}
+            )
+            signed = client.storage.from_("company-files").create_signed_url(
+                storage_path,
+                3600 * 24 * 7,  # berlaku 7 hari, di-generate ulang tiap dibuka
+            )
+            file_url = signed.get("signedURL") or signed.get("signed_url")
+        except Exception:
+            file_url = (
+                None  # upload storage gagal tidak boleh menggagalkan seluruh proses
+            )
+
+    preview = chunks[0][:2000] if chunks else ""
+
+    doc = (
         client.table("documents")
         .insert(
             {
                 "title": title,
-                "content": content,
-                "folder_path": normalize_folder(folder_path),
-                "embedding": embedding,
+                "content": preview,
+                "folder_path": folder_path,
                 "metadata": metadata or {},
                 "company_id": company_id,
+                "file_url": file_url,
             }
         )
         .execute()
     )
+    document_id = doc.data[0]["id"]
+
+    chunk_rows = [
+        {
+            "document_id": document_id,
+            "company_id": company_id,
+            "chunk_index": i,
+            "content": chunk,
+            "embedding": emb,
+        }
+        for i, (chunk, emb) in enumerate(zip(chunks, embeddings))
+    ]
+    if chunk_rows:
+        client.table("document_chunks").insert(chunk_rows).execute()
+
+    return document_id
 
 
 def search_documents(
@@ -250,7 +291,7 @@ def list_documents_in_folder(company_id: str, folder_path: str):
     client = get_client()
     r = (
         client.table("documents")
-        .select("id, title, metadata, created_at")
+        .select("id, title, metadata, created_at, file_url")
         .eq("company_id", company_id)
         .eq("folder_path", normalize_folder(folder_path))
         .order("created_at", desc=True)
@@ -295,20 +336,16 @@ def get_chat_messages(session_id: str):
 
 
 def add_chat_message(session_id: str, role: str, content: str):
-    """Menambahkan pesan chat baru dan memperbarui timestamp sesi aktif."""
     client = get_client()
     client.table("chat_messages").insert(
         {"session_id": session_id, "role": role, "content": content}
     ).execute()
-
-    # Bypass RLS saat memperbarui waktu aktivitas chat terakhir
     client.table("chat_sessions").update({"updated_at": "now()"}).eq(
         "id", session_id
     ).execute()
 
 
 def rename_chat_session(session_id: str, new_title: str):
-    """Mengubah nama/judul sesi percakapan."""
     client = get_client()
     client.table("chat_sessions").update({"title": new_title}).eq(
         "id", session_id
@@ -316,16 +353,11 @@ def rename_chat_session(session_id: str, new_title: str):
 
 
 def delete_chat_session(session_id: str):
-    """Menghapus sesi percakapan (otomatis menghapus pesan terkait jika cascade aktif di DB)."""
     client = get_client()
     client.table("chat_sessions").delete().eq("id", session_id).execute()
 
 
 def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
-    """
-    Mengubah nama folder beserta seluruh sub-folder, dokumen di dalamnya,
-    hingga memperbarui hak akses folder (folder_access) milik karyawan secara berantai.
-    """
     client = get_client()
     old_path = normalize_folder(old_path)
 
@@ -336,7 +368,6 @@ def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
     parent_path = "/" + "/".join(parts[:-1]) + "/" if len(parts) > 1 else "/"
     new_path = parent_path + new_name.strip() + "/"
 
-    # 1. Perbarui semua path di tabel folders yang berada di bawah folder tersebut
     folders = (
         client.table("folders")
         .select("path")
@@ -350,7 +381,6 @@ def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
             "company_id", company_id
         ).execute()
 
-    # 2. Perbarui lokasi folder_path untuk semua dokumen yang terdampak
     docs = (
         client.table("documents")
         .select("id, folder_path")
@@ -364,7 +394,6 @@ def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
             "id", d["id"]
         ).execute()
 
-    # 3. Sinkronisasi hak akses folder (folder_access) karyawan agar tidak kehilangan akses
     users = (
         client.table("users")
         .select("email, folder_access")

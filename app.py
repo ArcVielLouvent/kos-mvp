@@ -51,7 +51,10 @@ st.markdown(
         div[data-testid="stHorizontalBlock"] { gap: var(--kos-2) !important; }
         hr { margin: var(--kos-3) 0 !important; opacity: 0.5; }
 
-        .st-key-kos-row button, .st-key-kos-row button p {
+        .st-key-kos-row-chathist button, .st-key-kos-row-chathist button p,
+        .st-key-kos-row-folders button, .st-key-kos-row-folders button p,
+        .st-key-kos-row-files button, .st-key-kos-row-files button p,
+        .st-key-kos-row-picker button, .st-key-kos-row-picker button p {
             background: transparent !important;
             border: none !important;
             box-shadow: none !important;
@@ -63,10 +66,16 @@ st.markdown(
             border-radius: var(--kos-radius) !important;
             width: 100% !important;
         }
-        .st-key-kos-row button:hover { background: var(--kos-hover) !important; }
-        .st-key-kos-row button:disabled { color: #a1a1aa !important; opacity: 1 !important; }
+        .st-key-kos-row-chathist button:hover, .st-key-kos-row-folders button:hover,
+        .st-key-kos-row-files button:hover, .st-key-kos-row-picker button:hover {
+            background: var(--kos-hover) !important;
+        }
+        .st-key-kos-row-files button:disabled { color: #a1a1aa !important; opacity: 1 !important; }
 
-        div[data-testid="stVerticalBlock"].st-key-kos-row {
+        div[data-testid="stVerticalBlock"].st-key-kos-row-chathist,
+        div[data-testid="stVerticalBlock"].st-key-kos-row-folders,
+        div[data-testid="stVerticalBlock"].st-key-kos-row-files,
+        div[data-testid="stVerticalBlock"].st-key-kos-row-picker {
             background: transparent !important;
             border: none !important;
             box-shadow: none !important;
@@ -301,7 +310,7 @@ def sidebar_nav(options: list, icons: list, current_menu: str):
                 st.session_state.current_session_id = None
                 st.rerun()
 
-            with st.container(key="kos-row"):
+            with st.container(key="kos-row-chathist"):
                 for s in db.list_chat_sessions(st.session_state.user["email"]):
                     title = s["title"] or "Percakapan baru"
                     c1, c2 = st.columns([5, 1], vertical_alignment="center")
@@ -841,7 +850,7 @@ def file_manager_page():
 
     if children:
         st.markdown("<p class='kos-label'>Folder</p>", unsafe_allow_html=True)
-        with st.container(key="kos-row"):
+        with st.container(key="kos-row-folders"):
             for child in children:
                 name = child.rstrip("/").split("/")[-1]
                 row = st.columns([9, 1], vertical_alignment="center")
@@ -879,7 +888,7 @@ def file_manager_page():
 
     if docs:
         st.markdown("<p class='kos-label'>File</p>", unsafe_allow_html=True)
-        with st.container(key="kos-row"):
+        with st.container(key="kos-row-files"):
             for d in docs:
                 title_short = (
                     d["title"] if len(d["title"]) <= 46 else d["title"][:46] + "..."
@@ -897,10 +906,17 @@ def file_manager_page():
                     st.caption((d.get("created_at") or "")[:10])
                 with row[2]:
                     if d.get("file_url"):
+                        is_youtube = (
+                            d.get("metadata", {}).get("tipe_file") == "Video YouTube"
+                        )
                         st.link_button(
-                            "Unduh asli",
+                            "Buka YouTube" if is_youtube else "Unduh asli",
                             d["file_url"],
-                            icon=":material/download:",
+                            icon=(
+                                ":material/open_in_new:"
+                                if is_youtube
+                                else ":material/download:"
+                            ),
                             use_container_width=True,
                         )
                 with row[3]:
@@ -989,7 +1005,7 @@ def folder_picker(company_id: str, key_prefix: str) -> str:
     children = db.list_child_folders(company_id, current)
 
     if children:
-        with st.container(key="kos-row"):
+        with st.container(key="kos-row-picker"):
             for child in children:
                 name = child.rstrip("/").split("/")[-1]
                 if st.button(

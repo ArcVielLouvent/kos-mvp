@@ -144,20 +144,36 @@ def get_generation_model() -> str:
     return "gemini-3.5-flash"
 
 
+EMBEDDING_FALLBACK_MODELS = ["gemini-embedding-2", "gemini-embedding-001"]
+
+
 def embed_text(text: str) -> list:
-    """Sintaks ekstraksi array embedding dengan pembatasan dimensi ke 768"""
+    """
+    Sintaks ekstraksi array embedding dengan pembatasan dimensi ke 768.
+    Kalau model pertama kena kuota habis (429 RESOURCE_EXHAUSTED), otomatis
+    lompat ke model embedding berikutnya di EMBEDDING_FALLBACK_MODELS.
+    """
     client = get_client()
-    model_name = get_embedding_model()
+    last_error = None
 
-    result = _call_with_retry(
-        client.models.embed_content,
-        model=model_name,
-        contents=text,
-        config=types.EmbedContentConfig(output_dimensionality=768),
-    )
+    for model_name in EMBEDDING_FALLBACK_MODELS:
+        try:
+            result = _call_with_retry(
+                client.models.embed_content,
+                model=model_name,
+                contents=text,
+                config=types.EmbedContentConfig(output_dimensionality=768),
+            )
+            [embedding_obj] = result.embeddings
+            return embedding_obj.values
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+            if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
+                continue  # kuota model embedding ini habis -> coba model berikutnya
+            raise
 
-    [embedding_obj] = result.embeddings
-    return embedding_obj.values
+    raise last_error
 
 
 def generate_answer(question: str, context_documents: list) -> str:
@@ -328,6 +344,31 @@ def format_dataframe_as_text(df, sheet_name: str = "Data") -> str:
     header = " | ".join(str(c) for c in df.columns)
     rows = [" | ".join(str(v) for v in row) for row in df.itertuples(index=False)]
     return f"Sheet: {sheet_name}\n" + header + "\n" + "\n".join(rows)
+
+
+def describe_youtube_video(youtube_url: str) -> str:
+    """
+    Minta Gemini menonton video YouTube LANGSUNG dari URL-nya (tanpa perlu
+    download/upload file). Best-effort: kalau gagal (fitur berubah, video
+    private, dsb), kembalikan string kosong -- pemanggil tinggal fallback
+    ke judul+deskripsi manual saja.
+    """
+    try:
+        prompt = (
+            "Tonton video ini dan buatkan ringkasan konten yang detail: topik utama, "
+            "langkah-langkah atau poin penting yang dibahas, dan konteks lain yang "
+            "relevan untuk pencarian internal perusahaan."
+        )
+        contents = types.Content(
+            parts=[
+                types.Part(file_data=types.FileData(file_uri=youtube_url)),
+                types.Part(text=prompt),
+            ]
+        )
+        response = _generate_with_fallback(contents)
+        return response.text or ""
+    except Exception:
+        return ""
 
 
 def extract_pdf_text_local(file_path: str) -> str:

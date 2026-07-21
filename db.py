@@ -146,6 +146,7 @@ def insert_document_with_chunks(
     metadata: dict = None,
     file_bytes: bytes = None,
     original_filename: str = None,
+    external_url: str = None,
 ) -> str:
     """
     Simpan 1 baris di `documents` (file utuh, muncul 1x di File Manager, ada link
@@ -157,8 +158,8 @@ def insert_document_with_chunks(
     folder_path = normalize_folder(folder_path)
     create_folder(company_id, folder_path)
 
-    file_url = None
-    if file_bytes and original_filename:
+    file_url = external_url
+    if not file_url and file_bytes and original_filename:
         storage_path = f"{company_id}/{folder_path.strip('/')}/{original_filename}"
         try:
             client.storage.from_("company-files").upload(
@@ -287,17 +288,22 @@ def list_child_folders(company_id: str, parent_path: str) -> list:
     return sorted(children)
 
 
-def list_documents_in_folder(company_id: str, folder_path: str):
+def list_documents_in_folder(
+    company_id: str, folder_path: str, page: int = 1, page_size: int = 20
+):
+    """Return (list_dokumen, total_count) -- dipaginasi supaya tidak jadi 1 daftar panjang."""
     client = get_client()
+    offset = (page - 1) * page_size
     r = (
         client.table("documents")
-        .select("id, title, metadata, created_at, file_url")
+        .select("id, title, metadata, created_at, file_url", count="exact")
         .eq("company_id", company_id)
         .eq("folder_path", normalize_folder(folder_path))
         .order("created_at", desc=True)
+        .range(offset, offset + page_size - 1)
         .execute()
     )
-    return r.data
+    return r.data, (r.count or 0)
 
 
 # ---------- CHAT HISTORY ----------

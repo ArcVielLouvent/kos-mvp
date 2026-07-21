@@ -358,6 +358,17 @@ def sidebar_nav(options: list, icons: list, current_menu: str):
 # ==========================================
 # CHAT KOS
 # ==========================================
+def render_source_link(d: dict):
+    """Video YouTube -> tampilkan video player langsung. Lainnya -> tombol download."""
+    if d.get("metadata", {}).get("tipe_file") == "Video YouTube":
+        st.caption(d["title"])
+        st.video(d["file_url"])
+    else:
+        st.link_button(
+            f"Unduh: {d['title']}", d["file_url"], icon=":material/download:"
+        )
+
+
 def chat_page():
     user = st.session_state.user
     user_name = user["email"].split("@")[0].replace(".", " ").title()
@@ -413,11 +424,7 @@ def chat_page():
                                 )
                                 st.write(answer)
                                 for d in unique_docs:
-                                    st.link_button(
-                                        f"Unduh: {d['title']}",
-                                        d["file_url"],
-                                        icon=":material/download:",
-                                    )
+                                    render_source_link(d)
                             else:
                                 answer = "Dokumen ditemukan, tapi file aslinya tidak tersedia untuk diunduh."
                                 st.write(answer)
@@ -434,17 +441,13 @@ def chat_page():
                         )
                         st.write(answer)
 
-                        # Tombol download file asli -- dedup, 1 tombol per dokumen unik
+                        # Tombol/video sumber -- dedup, 1 per dokumen unik
                         if docs:
                             seen = set()
                             for d in docs:
                                 if d.get("file_url") and d["id"] not in seen:
                                     seen.add(d["id"])
-                                    st.link_button(
-                                        f"Unduh: {d['title']}",
-                                        d["file_url"],
-                                        icon=":material/download:",
-                                    )
+                                    render_source_link(d)
 
                     db.add_chat_message(
                         st.session_state.current_session_id, "assistant", answer
@@ -478,6 +481,8 @@ def file_type_icon(metadata: dict) -> str:
         return ":material/image:"
     if tipe == "Dokumen RTF":
         return ":material/description:"
+    if tipe == "Video YouTube":
+        return ":material/smart_display:"
     return ":material/description:"
 
 
@@ -515,7 +520,7 @@ def file_manager_page():
     st.write("")
 
     if user_role == "Admin":
-        col_a, col_b, _ = st.columns([2, 2, 8])
+        col_a, col_b, col_c, _ = st.columns([2, 2, 2, 6])
         with col_a:
             with st.popover(
                 "Folder baru",
@@ -528,6 +533,43 @@ def file_manager_page():
                         db.create_folder(company_id, current + new_name.strip() + "/")
                         flash(f"Folder '{new_name.strip()}' dibuat.")
                         st.rerun(scope="fragment")
+        with col_c:
+            with st.popover(
+                "Video YouTube",
+                use_container_width=True,
+                icon=":material/smart_display:",
+            ):
+                yt_title = st.text_input("Judul video", key="yt_title")
+                yt_url = st.text_input(
+                    "Link YouTube (unlisted/publik)",
+                    key="yt_url",
+                    placeholder="https://youtu.be/...",
+                )
+                yt_desc = st.text_area(
+                    "Deskripsi singkat (opsional)", key="yt_desc", height=80
+                )
+                if st.button("Tambahkan", type="primary", key="btn_add_youtube"):
+                    if yt_title.strip() and yt_url.strip():
+                        with st.spinner("Menganalisis video..."):
+                            enriched = ai.describe_youtube_video(yt_url.strip())
+                            content = f"{yt_title}\n{yt_desc}"
+                            if enriched:
+                                content += f"\n\n{enriched}"
+                            chunks = ai.chunk_text(content) or [content]
+                            embeddings = ai.embed_chunks_parallel(chunks)
+                            db.insert_document_with_chunks(
+                                title=yt_title.strip(),
+                                chunks=chunks,
+                                embeddings=embeddings,
+                                company_id=company_id,
+                                folder_path=current,
+                                metadata={"tipe_file": "Video YouTube"},
+                                external_url=yt_url.strip(),
+                            )
+                        flash(f"Video '{yt_title.strip()}' ditambahkan.")
+                        st.rerun(scope="fragment")
+                    else:
+                        st.warning("Judul dan link YouTube wajib diisi.")
         with col_b:
             with st.popover(
                 "Upload file", use_container_width=True, icon=":material/upload_file:"
@@ -781,10 +823,19 @@ def file_manager_page():
 
     st.divider()
 
-    children = db.list_child_folders(company_id, current)
-    docs = db.list_documents_in_folder(company_id, current)
+    if "fm_doc_page" not in st.session_state:
+        st.session_state.fm_doc_page = 1
+    if st.session_state.get("fm_doc_page_folder") != current:
+        st.session_state.fm_doc_page = 1
+        st.session_state.fm_doc_page_folder = current
 
-    if not children and not docs:
+    PAGE_SIZE = 20
+    children = db.list_child_folders(company_id, current)
+    docs, total_docs = db.list_documents_in_folder(
+        company_id, current, page=st.session_state.fm_doc_page, page_size=PAGE_SIZE
+    )
+
+    if not children and total_docs == 0:
         st.caption("Direktori ini masih kosong.")
         return
 
@@ -876,6 +927,37 @@ def file_manager_page():
                             ):
                                 db.delete_document(d["id"])
                                 st.rerun(scope="fragment")
+
+        # --- Navigasi halaman (bukan infinite scroll) ---
+        total_pages = max(1, (total_docs + PAGE_SIZE - 1) // PAGE_SIZE)
+        if total_pages > 1:
+            st.write("")
+            nav_cols = st.columns([1, 2, 1])
+            with nav_cols[0]:
+                if st.button(
+                    "Sebelumnya",
+                    disabled=(st.session_state.fm_doc_page <= 1),
+                    icon=":material/chevron_left:",
+                    key="fm_page_prev",
+                ):
+                    st.session_state.fm_doc_page -= 1
+                    st.rerun(scope="fragment")
+            with nav_cols[1]:
+                st.markdown(
+                    f"<p style='text-align:center; color:#71717a; margin:0;'>"
+                    f"Halaman {st.session_state.fm_doc_page} dari {total_pages} "
+                    f"({total_docs} file)</p>",
+                    unsafe_allow_html=True,
+                )
+            with nav_cols[2]:
+                if st.button(
+                    "Berikutnya",
+                    disabled=(st.session_state.fm_doc_page >= total_pages),
+                    icon=":material/chevron_right:",
+                    key="fm_page_next",
+                ):
+                    st.session_state.fm_doc_page += 1
+                    st.rerun(scope="fragment")
 
 
 # ==========================================

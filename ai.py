@@ -101,6 +101,37 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list:
     return [c for c in chunks if len(c) > 10]
 
 
+FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
+
+
+def _generate_with_fallback(contents):
+    """
+    Coba generate_content dengan beberapa model Gemini berurutan.
+    - Kalau kena KUOTA HABIS (429 RESOURCE_EXHAUSTED) -> langsung lompat ke
+      model berikutnya di FALLBACK_MODELS (percuma ditunggu, kuota per-model beda).
+    - Kalau kena error transient (503/dsb) -> tetap coba ulang di model yang sama
+      dulu lewat _call_with_retry, baru lompat model kalau itu juga gagal terus.
+    """
+    client = get_client()
+    last_error = None
+
+    for model_name in FALLBACK_MODELS:
+        try:
+            return _call_with_retry(
+                client.models.generate_content,
+                model=model_name,
+                contents=contents,
+            )
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+            if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
+                continue  # kuota model ini habis -> lanjut ke model berikutnya
+            raise  # error lain (bukan soal kuota), jangan asal ganti model
+
+    raise last_error
+
+
 @st.cache_resource
 def get_embedding_model() -> str:
     """Otomatis beralih ke lini Gemini Embedding terbaru"""
@@ -160,12 +191,7 @@ ATURAN KHUSUS UNTUK DATA TABEL (baris berformat "kolom1 | kolom2 | ..."):
 
 Pertanyaan: {question}
 """
-    model_name = get_generation_model()
-    response = _call_with_retry(
-        client.models.generate_content,
-        model=model_name,
-        contents=prompt,
-    )
+    response = _generate_with_fallback(prompt)
     return response.text
 
 
@@ -215,12 +241,7 @@ def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str
         else:
             prompt = "Ekstrak seluruh informasi dari file ini menjadi teks terstruktur murni."
 
-        model_name = get_generation_model()
-        response = _call_with_retry(
-            client.models.generate_content,
-            model=model_name,
-            contents=[uploaded_file, prompt],
-        )
+        response = _generate_with_fallback([uploaded_file, prompt])
 
         try:
             client.files.delete(name=uploaded_file.name)

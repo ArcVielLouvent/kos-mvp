@@ -9,3 +9,5 @@ python-pptx
 openpyxl
 striprtf
 pdfplumber
+pytesseract
+pdf2image

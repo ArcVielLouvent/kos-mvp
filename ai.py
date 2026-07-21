@@ -1,4 +1,3 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import time
 from google import genai
@@ -14,13 +13,27 @@ def is_file_request(question: str) -> bool:
     berbasis AI (butuh 1 API call tambahan, ada biaya & latency).
     """
     keywords = [
-        "file asli", "file aslinya", "filenya", "file nya",
-        "download", "unduh", "downloadkan", "unduhkan",
-        "kirim file", "kirimkan file", "berikan file", "kasih file",
-        "dokumen aslinya", "dokumen asli", "dokumennya",
+        "file asli",
+        "file aslinya",
+        "filenya",
+        "file nya",
+        "download",
+        "unduh",
+        "downloadkan",
+        "unduhkan",
+        "kirim file",
+        "kirimkan file",
+        "berikan file",
+        "kasih file",
+        "dokumen aslinya",
+        "dokumen asli",
+        "dokumennya",
     ]
     q = question.lower()
     return any(kw in q for kw in keywords)
+
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def embed_chunks_parallel(chunks: list, max_workers: int = 4) -> list:
@@ -60,10 +73,11 @@ def _call_with_retry(func, *args, max_retries: int = 4, base_delay: int = 3, **k
             last_error = e
             error_str = str(e)
             is_transient = any(
-                code in error_str for code in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"]
+                code in error_str
+                for code in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"]
             )
             if is_transient and attempt < max_retries - 1:
-                wait = base_delay * (2 ** attempt)
+                wait = base_delay * (2**attempt)
                 time.sleep(wait)
                 continue
             raise
@@ -176,8 +190,7 @@ def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str
                 client.files.delete(name=uploaded_file.name)
             except Exception:
                 pass
-            raise ValueError(
-                f"Google Gemini gagal memproses file '{display_name}'.")
+            raise ValueError(f"Google Gemini gagal memproses file '{display_name}'.")
 
         if "pdf" in mime_type:
             prompt = (
@@ -217,13 +230,15 @@ def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str
         hasil_teks = response.text
         if not hasil_teks or not hasil_teks.strip():
             raise ValueError(
-                f"Tidak ada teks yang bisa diekstrak dari '{display_name}'.")
+                f"Tidak ada teks yang bisa diekstrak dari '{display_name}'."
+            )
 
         return hasil_teks
 
     except Exception as e:
         raise RuntimeError(
-            f"Gagal mengekstrak '{display_name}' via Google File API: {str(e)}")
+            f"Gagal mengekstrak '{display_name}' via Google File API: {str(e)}"
+        )
 
 
 # ==========================================
@@ -280,8 +295,7 @@ def extract_xlsx_text(file_path: str) -> list:
         rows = []
         for row in sheet.iter_rows(values_only=True):
             if any(cell is not None for cell in row):
-                rows.append(" | ".join(
-                    str(c) if c is not None else "" for c in row))
+                rows.append(" | ".join(str(c) if c is not None else "" for c in row))
         if rows:
             sheets.append((sheet.title, "\n".join(rows)))
 
@@ -291,8 +305,7 @@ def extract_xlsx_text(file_path: str) -> list:
 def format_dataframe_as_text(df, sheet_name: str = "Data") -> str:
     """Ubah pandas DataFrame (mis. dari CSV) jadi teks tabel utuh, tanpa dipotong per baris."""
     header = " | ".join(str(c) for c in df.columns)
-    rows = [" | ".join(str(v) for v in row)
-            for row in df.itertuples(index=False)]
+    rows = [" | ".join(str(v) for v in row) for row in df.itertuples(index=False)]
     return f"Sheet: {sheet_name}\n" + header + "\n" + "\n".join(rows)
 
 
@@ -310,6 +323,24 @@ def extract_pdf_text_local(file_path: str) -> str:
             text = page.extract_text() or ""
             if text.strip():
                 parts.append(f"Halaman {i + 1}:\n{text}")
+    return "\n\n".join(parts)
+
+
+def extract_pdf_ocr_local(file_path: str) -> str:
+    """
+    OCR lokal pakai Tesseract -- gratis, tanpa API, tanpa kuota Gemini sama sekali.
+    Dipakai khusus untuk PDF hasil scan/gambar yang tidak punya teks digital
+    (extract_pdf_text_local akan kosong untuk PDF jenis ini).
+    """
+    import pytesseract
+    from pdf2image import convert_from_path
+
+    images = convert_from_path(file_path)
+    parts = []
+    for i, image in enumerate(images):
+        text = pytesseract.image_to_string(image, lang="ind+eng")
+        if text.strip():
+            parts.append(f"Halaman {i + 1}:\n{text}")
     return "\n\n".join(parts)
 
 

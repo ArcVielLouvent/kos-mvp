@@ -601,13 +601,19 @@ def file_manager_page():
                                         chunks = ai.chunk_text(content)
                                         tipe_file = "Dokumen RTF"
 
-                                    # ---------- PDF: coba lokal dulu (gratis, tanpa kuota) ----------
+                                    # ---------- PDF: 3 tingkat, Gemini opsi TERAKHIR ----------
                                     elif ext == "pdf":
                                         with open(temp, "wb") as file:
                                             file.write(f.getbuffer())
                                         content = ai.extract_pdf_text_local(temp)
                                         if len(content.strip()) < 50:
-                                            # Kemungkinan PDF hasil scan/gambar -> fallback Gemini
+                                            # Kemungkinan hasil scan -> coba OCR lokal (gratis)
+                                            try:
+                                                content = ai.extract_pdf_ocr_local(temp)
+                                            except Exception:
+                                                content = ""
+                                        if len(content.strip()) < 50:
+                                            # OCR lokal pun gagal -> baru pakai Gemini (pakai kuota)
                                             content = ai.extract_multimodal(
                                                 temp, "application/pdf", f.name
                                             )

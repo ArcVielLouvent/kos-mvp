@@ -33,6 +33,24 @@ def is_file_request(question: str) -> bool:
     return any(kw in q for kw in keywords)
 
 
+def filter_docs_by_intent(question: str, docs: list) -> list:
+    """
+    Kalau user secara eksplisit minta VIDEO, saring hasil pencarian supaya
+    cuma dokumen bertipe Video YouTube yang ditampilkan -- mencegah dokumen
+    lain (xlsx/pdf) yang kebetulan mirip kata kunci ikut nongol sebagai
+    jawaban/tombol yang tidak relevan.
+    """
+    video_keywords = ["video", "youtube", "tonton", "nonton", "putar"]
+    q = question.lower()
+    if any(kw in q for kw in video_keywords):
+        video_docs = [
+            d for d in docs if d.get("metadata", {}).get("tipe_file") == "Video YouTube"
+        ]
+        if video_docs:
+            return video_docs
+    return docs
+
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 

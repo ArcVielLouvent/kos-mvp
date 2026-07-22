@@ -396,7 +396,7 @@ def chat_page():
         for m in db.get_chat_messages(st.session_state.current_session_id):
             with st.chat_message(m["role"]):
                 st.write(m["content"])
-                for src in (m.get("sources") or []):
+                for src in m.get("sources") or []:
                     render_source_link(src)
 
     question = st.chat_input("Ketik pertanyaan Anda di sini...")
@@ -422,6 +422,7 @@ def chat_page():
                         match_count=3,
                         folder_prefix=user["folder_access"],
                     )
+                    docs = ai.filter_docs_by_intent(question, docs)
                     used_sources = []
                     seen = set()
 
@@ -429,11 +430,15 @@ def chat_page():
                         # Niat: minta file asli -- skip jawaban AI, langsung tombol download
                         if docs:
                             unique_docs = [
-                                d for d in docs
-                                if d.get("file_url") and not (d["id"] in seen or seen.add(d["id"]))
+                                d
+                                for d in docs
+                                if d.get("file_url")
+                                and not (d["id"] in seen or seen.add(d["id"]))
                             ]
                             if unique_docs:
-                                answer = f"Ditemukan {len(unique_docs)} dokumen yang sesuai:"
+                                answer = (
+                                    f"Ditemukan {len(unique_docs)} dokumen yang sesuai:"
+                                )
                                 st.write(answer)
                                 for d in unique_docs:
                                     render_source_link(d)
@@ -442,7 +447,9 @@ def chat_page():
                                 answer = "Dokumen ditemukan, tapi file aslinya tidak tersedia untuk diunduh."
                                 st.write(answer)
                         else:
-                            answer = "Tidak ada dokumen yang cocok ditemukan di folder Anda."
+                            answer = (
+                                "Tidak ada dokumen yang cocok ditemukan di folder Anda."
+                            )
                             st.write(answer)
                     else:
                         answer = (
@@ -472,7 +479,9 @@ def chat_page():
                     ]
 
                     db.add_chat_message(
-                        st.session_state.current_session_id, "assistant", answer,
+                        st.session_state.current_session_id,
+                        "assistant",
+                        answer,
                         sources=sources_to_save,
                     )
                 except Exception as e:
@@ -562,8 +571,9 @@ def file_manager_page():
             ):
                 yt_title = st.text_input("Judul video", key="yt_title")
                 yt_url = st.text_input(
-                    "Link YouTube (unlisted/publik)", key="yt_url",
-                    placeholder="https://youtu.be/..."
+                    "Link YouTube (unlisted/publik)",
+                    key="yt_url",
+                    placeholder="https://youtu.be/...",
                 )
                 yt_desc = st.text_area(
                     "Deskripsi singkat (opsional)", key="yt_desc", height=80
@@ -624,7 +634,9 @@ def file_manager_page():
                                     if ext == "csv":
                                         df = pd.read_csv(f)
                                         chunks = [
-                                            ai.format_dataframe_as_text(df, sheet_name=f.name)
+                                            ai.format_dataframe_as_text(
+                                                df, sheet_name=f.name
+                                            )
                                         ]
                                         tipe_file = "CSV Data"
 
@@ -641,10 +653,19 @@ def file_manager_page():
 
                                     # ---------- Teks terstruktur: baca langsung ----------
                                     elif ext in [
-                                        "txt", "md", "json", "xml",
-                                        "html", "htm", "yaml", "yml", "log",
+                                        "txt",
+                                        "md",
+                                        "json",
+                                        "xml",
+                                        "html",
+                                        "htm",
+                                        "yaml",
+                                        "yml",
+                                        "log",
                                     ]:
-                                        content = f.getvalue().decode("utf-8", errors="ignore")
+                                        content = f.getvalue().decode(
+                                            "utf-8", errors="ignore"
+                                        )
                                         chunks = ai.chunk_text(content)
                                         tipe_file = "Teks"
 
@@ -701,16 +722,26 @@ def file_manager_page():
 
                                     # ---------- Gambar ----------
                                     elif ext in [
-                                        "jpg", "jpeg", "png", "webp",
-                                        "gif", "bmp", "heic", "heif",
+                                        "jpg",
+                                        "jpeg",
+                                        "png",
+                                        "webp",
+                                        "gif",
+                                        "bmp",
+                                        "heic",
+                                        "heif",
                                     ]:
                                         with open(temp, "wb") as file:
                                             file.write(f.getbuffer())
                                         image_mime = {
-                                            "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                                            "png": "image/png", "webp": "image/webp",
-                                            "gif": "image/gif", "bmp": "image/bmp",
-                                            "heic": "image/heic", "heif": "image/heif",
+                                            "jpg": "image/jpeg",
+                                            "jpeg": "image/jpeg",
+                                            "png": "image/png",
+                                            "webp": "image/webp",
+                                            "gif": "image/gif",
+                                            "bmp": "image/bmp",
+                                            "heic": "image/heic",
+                                            "heif": "image/heif",
                                         }
                                         content = ai.extract_multimodal(
                                             temp, image_mime[ext], f.name
@@ -720,26 +751,49 @@ def file_manager_page():
 
                                     # ---------- Audio & Video ----------
                                     elif ext in [
-                                        "mp4", "mov", "avi", "flv",
-                                        "mpeg", "mpg", "webm", "wmv", "3gp",
-                                        "mp3", "wav", "aiff", "aac", "ogg", "flac",
+                                        "mp4",
+                                        "mov",
+                                        "avi",
+                                        "flv",
+                                        "mpeg",
+                                        "mpg",
+                                        "webm",
+                                        "wmv",
+                                        "3gp",
+                                        "mp3",
+                                        "wav",
+                                        "aiff",
+                                        "aac",
+                                        "ogg",
+                                        "flac",
                                     ]:
                                         with open(temp, "wb") as file:
                                             file.write(f.getbuffer())
                                         video_mime = {
-                                            "mp4": "video/mp4", "mov": "video/quicktime",
-                                            "avi": "video/x-msvideo", "flv": "video/x-flv",
-                                            "mpeg": "video/mpeg", "mpg": "video/mpeg",
-                                            "webm": "video/webm", "wmv": "video/x-ms-wmv",
+                                            "mp4": "video/mp4",
+                                            "mov": "video/quicktime",
+                                            "avi": "video/x-msvideo",
+                                            "flv": "video/x-flv",
+                                            "mpeg": "video/mpeg",
+                                            "mpg": "video/mpeg",
+                                            "webm": "video/webm",
+                                            "wmv": "video/x-ms-wmv",
                                             "3gp": "video/3gpp",
                                         }
                                         audio_mime = {
-                                            "mp3": "audio/mp3", "wav": "audio/wav",
-                                            "aiff": "audio/aiff", "aac": "audio/aac",
-                                            "ogg": "audio/ogg", "flac": "audio/flac",
+                                            "mp3": "audio/mp3",
+                                            "wav": "audio/wav",
+                                            "aiff": "audio/aiff",
+                                            "aac": "audio/aac",
+                                            "ogg": "audio/ogg",
+                                            "flac": "audio/flac",
                                         }
-                                        mime = video_mime.get(ext) or audio_mime.get(ext)
-                                        content = ai.extract_multimodal(temp, mime, f.name)
+                                        mime = video_mime.get(ext) or audio_mime.get(
+                                            ext
+                                        )
+                                        content = ai.extract_multimodal(
+                                            temp, mime, f.name
+                                        )
                                         chunks = ai.chunk_text(content)
                                         tipe_file = "Media Transkrip"
 
@@ -843,7 +897,9 @@ def file_manager_page():
             )
         with sel_cols[1]:
             if st.button(
-                "Hapus terpilih", type="primary", icon=":material/delete_sweep:",
+                "Hapus terpilih",
+                type="primary",
+                icon=":material/delete_sweep:",
                 key="btn_bulk_delete",
             ):
                 for fpath in list(selected_folders):
@@ -865,7 +921,8 @@ def file_manager_page():
                     row = st.columns([0.6, 8.4, 1], vertical_alignment="center")
                     with row[0]:
                         checked = st.checkbox(
-                            "", key=f"chk_folder_{child}",
+                            "",
+                            key=f"chk_folder_{child}",
                             value=(child in selected_folders),
                             label_visibility="collapsed",
                         )
@@ -921,7 +978,8 @@ def file_manager_page():
                     row = st.columns([0.6, 5.4, 2, 2, 1], vertical_alignment="center")
                     with row[0]:
                         checked = st.checkbox(
-                            "", key=f"chk_doc_{d['id']}",
+                            "",
+                            key=f"chk_doc_{d['id']}",
                             value=(d["id"] in selected_docs),
                             label_visibility="collapsed",
                         )
@@ -929,10 +987,20 @@ def file_manager_page():
                             selected_docs.add(d["id"])
                         else:
                             selected_docs.discard(d["id"])
-                    title_col, date_col, link_col, opt_col = row[1], row[2], row[3], row[4]
+                    title_col, date_col, link_col, opt_col = (
+                        row[1],
+                        row[2],
+                        row[3],
+                        row[4],
+                    )
                 else:
                     row = st.columns([6, 2, 2, 1], vertical_alignment="center")
-                    title_col, date_col, link_col, opt_col = row[0], row[1], row[2], row[3]
+                    title_col, date_col, link_col, opt_col = (
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3],
+                    )
 
                 with title_col:
                     st.button(
@@ -952,7 +1020,11 @@ def file_manager_page():
                         st.link_button(
                             "Buka YouTube" if is_youtube else "Unduh asli",
                             d["file_url"],
-                            icon=":material/open_in_new:" if is_youtube else ":material/download:",
+                            icon=(
+                                ":material/open_in_new:"
+                                if is_youtube
+                                else ":material/download:"
+                            ),
                             use_container_width=True,
                         )
                 with opt_col:
@@ -1045,8 +1117,10 @@ def folder_picker(company_id: str, key_prefix: str) -> str:
             for child in children:
                 name = child.rstrip("/").split("/")[-1]
                 if st.button(
-                    name, key=f"{key_prefix}_nav_{child}",
-                    icon=":material/folder:", use_container_width=True,
+                    name,
+                    key=f"{key_prefix}_nav_{child}",
+                    icon=":material/folder:",
+                    use_container_width=True,
                 ):
                     st.session_state[state_key] = child
                     st.rerun()

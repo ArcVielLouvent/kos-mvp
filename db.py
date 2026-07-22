@@ -146,6 +146,7 @@ def insert_document_with_chunks(
     metadata: dict = None,
     file_bytes: bytes = None,
     original_filename: str = None,
+    external_url: str = None,
 ) -> str:
     """
     Simpan 1 baris di `documents` (file utuh, muncul 1x di File Manager, ada link
@@ -157,22 +158,26 @@ def insert_document_with_chunks(
     folder_path = normalize_folder(folder_path)
     create_folder(company_id, folder_path)
 
-    file_url = None
-    if file_bytes and original_filename:
+    file_url = external_url
+    if not file_url and file_bytes and original_filename:
         storage_path = f"{company_id}/{folder_path.strip('/')}/{original_filename}"
         try:
             client.storage.from_("company-files").upload(
                 storage_path, file_bytes, {"upsert": "true"}
             )
             signed = client.storage.from_("company-files").create_signed_url(
-                storage_path,
-                3600 * 24 * 7,  # berlaku 7 hari, di-generate ulang tiap dibuka
+                storage_path, 3600 * 24 * 7  # berlaku 7 hari, di-generate ulang tiap dibuka
             )
             file_url = signed.get("signedURL") or signed.get("signed_url")
-        except Exception:
-            file_url = (
-                None  # upload storage gagal tidak boleh menggagalkan seluruh proses
+        except Exception as e:
+            # Sengaja TIDAK ditelan diam-diam -- tampilkan biar bisa didiagnosis.
+            # Dokumen tetap tersimpan (bisa dicari & dijawab AI), cuma tanpa file
+            # asli untuk didownload.
+            st.warning(
+                f"'{title}': gagal upload ke Storage, dokumen tetap tersimpan "
+                f"tapi TANPA file asli untuk didownload. Penyebab: {e}"
             )
+            file_url = None
 
     preview = chunks[0][:2000] if chunks else ""
 
@@ -281,23 +286,28 @@ def list_child_folders(company_id: str, parent_path: str) -> list:
     children = set()
     for path in all_paths:
         if path.startswith(parent_path) and path != parent_path:
-            first_segment = path[len(parent_path) :].split("/")[0]
+            first_segment = path[len(parent_path):].split("/")[0]
             if first_segment:
                 children.add(parent_path + first_segment + "/")
     return sorted(children)
 
 
-def list_documents_in_folder(company_id: str, folder_path: str):
+def list_documents_in_folder(
+    company_id: str, folder_path: str, page: int = 1, page_size: int = 20
+):
+    """Return (list_dokumen, total_count) -- dipaginasi supaya tidak jadi 1 daftar panjang."""
     client = get_client()
+    offset = (page - 1) * page_size
     r = (
         client.table("documents")
-        .select("id, title, metadata, created_at, file_url")
+        .select("id, title, metadata, created_at, file_url", count="exact")
         .eq("company_id", company_id)
         .eq("folder_path", normalize_folder(folder_path))
         .order("created_at", desc=True)
+        .range(offset, offset + page_size - 1)
         .execute()
     )
-    return r.data
+    return r.data, (r.count or 0)
 
 
 # ---------- CHAT HISTORY ----------
@@ -335,10 +345,10 @@ def get_chat_messages(session_id: str):
     return r.data
 
 
-def add_chat_message(session_id: str, role: str, content: str):
+def add_chat_message(session_id: str, role: str, content: str, sources: list = None):
     client = get_client()
     client.table("chat_messages").insert(
-        {"session_id": session_id, "role": role, "content": content}
+        {"session_id": session_id, "role": role, "content": content, "sources": sources or []}
     ).execute()
     client.table("chat_sessions").update({"updated_at": "now()"}).eq(
         "id", session_id

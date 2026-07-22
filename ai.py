@@ -13,13 +13,45 @@ def is_file_request(question: str) -> bool:
     berbasis AI (butuh 1 API call tambahan, ada biaya & latency).
     """
     keywords = [
-        "file asli", "file aslinya", "filenya", "file nya",
-        "download", "unduh", "downloadkan", "unduhkan",
-        "kirim file", "kirimkan file", "berikan file", "kasih file",
-        "dokumen aslinya", "dokumen asli", "dokumennya",
+        "file asli",
+        "file aslinya",
+        "filenya",
+        "file nya",
+        "download",
+        "unduh",
+        "downloadkan",
+        "unduhkan",
+        "kirim file",
+        "kirimkan file",
+        "berikan file",
+        "kasih file",
+        "dokumen aslinya",
+        "dokumen asli",
+        "dokumennya",
     ]
     q = question.lower()
     return any(kw in q for kw in keywords)
+
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def embed_chunks_parallel(chunks: list, max_workers: int = 4) -> list:
+    """
+    Embed banyak chunk SEKALIGUS secara paralel (bukan satu-satu berurutan).
+    Mempercepat upload file besar/banyak chunk secara signifikan.
+    max_workers dibatasi (bukan tanpa batas) supaya tidak memicu rate limit --
+    kalau tetap kena, _call_with_retry di embed_text yang menangani otomatis.
+    """
+    results = [None] * len(chunks)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {
+            executor.submit(embed_text, chunk): i for i, chunk in enumerate(chunks)
+        }
+        for future in as_completed(future_to_index):
+            i = future_to_index[future]
+            results[i] = future.result()
+    return results
 
 
 def get_client() -> genai.Client:
@@ -41,10 +73,11 @@ def _call_with_retry(func, *args, max_retries: int = 4, base_delay: int = 3, **k
             last_error = e
             error_str = str(e)
             is_transient = any(
-                code in error_str for code in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"]
+                code in error_str
+                for code in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"]
             )
             if is_transient and attempt < max_retries - 1:
-                wait = base_delay * (2 ** attempt)
+                wait = base_delay * (2**attempt)
                 time.sleep(wait)
                 continue
             raise
@@ -68,6 +101,37 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list:
     return [c for c in chunks if len(c) > 10]
 
 
+FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
+
+
+def _generate_with_fallback(contents):
+    """
+    Coba generate_content dengan beberapa model Gemini berurutan.
+    - Kalau kena KUOTA HABIS (429 RESOURCE_EXHAUSTED) -> langsung lompat ke
+      model berikutnya di FALLBACK_MODELS (percuma ditunggu, kuota per-model beda).
+    - Kalau kena error transient (503/dsb) -> tetap coba ulang di model yang sama
+      dulu lewat _call_with_retry, baru lompat model kalau itu juga gagal terus.
+    """
+    client = get_client()
+    last_error = None
+
+    for model_name in FALLBACK_MODELS:
+        try:
+            return _call_with_retry(
+                client.models.generate_content,
+                model=model_name,
+                contents=contents,
+            )
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+            if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
+                continue  # kuota model ini habis -> lanjut ke model berikutnya
+            raise  # error lain (bukan soal kuota), jangan asal ganti model
+
+    raise last_error
+
+
 @st.cache_resource
 def get_embedding_model() -> str:
     """Otomatis beralih ke lini Gemini Embedding terbaru"""
@@ -80,20 +144,36 @@ def get_generation_model() -> str:
     return "gemini-3.5-flash"
 
 
+EMBEDDING_FALLBACK_MODELS = ["gemini-embedding-2", "gemini-embedding-001"]
+
+
 def embed_text(text: str) -> list:
-    """Sintaks ekstraksi array embedding dengan pembatasan dimensi ke 768"""
+    """
+    Sintaks ekstraksi array embedding dengan pembatasan dimensi ke 768.
+    Kalau model pertama kena kuota habis (429 RESOURCE_EXHAUSTED), otomatis
+    lompat ke model embedding berikutnya di EMBEDDING_FALLBACK_MODELS.
+    """
     client = get_client()
-    model_name = get_embedding_model()
+    last_error = None
 
-    result = _call_with_retry(
-        client.models.embed_content,
-        model=model_name,
-        contents=text,
-        config=types.EmbedContentConfig(output_dimensionality=768),
-    )
+    for model_name in EMBEDDING_FALLBACK_MODELS:
+        try:
+            result = _call_with_retry(
+                client.models.embed_content,
+                model=model_name,
+                contents=text,
+                config=types.EmbedContentConfig(output_dimensionality=768),
+            )
+            [embedding_obj] = result.embeddings
+            return embedding_obj.values
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+            if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
+                continue  # kuota model embedding ini habis -> coba model berikutnya
+            raise
 
-    [embedding_obj] = result.embeddings
-    return embedding_obj.values
+    raise last_error
 
 
 def generate_answer(question: str, context_documents: list) -> str:
@@ -127,12 +207,7 @@ ATURAN KHUSUS UNTUK DATA TABEL (baris berformat "kolom1 | kolom2 | ..."):
 
 Pertanyaan: {question}
 """
-    model_name = get_generation_model()
-    response = _call_with_retry(
-        client.models.generate_content,
-        model=model_name,
-        contents=prompt,
-    )
+    response = _generate_with_fallback(prompt)
     return response.text
 
 
@@ -182,12 +257,7 @@ def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str
         else:
             prompt = "Ekstrak seluruh informasi dari file ini menjadi teks terstruktur murni."
 
-        model_name = get_generation_model()
-        response = _call_with_retry(
-            client.models.generate_content,
-            model=model_name,
-            contents=[uploaded_file, prompt],
-        )
+        response = _generate_with_fallback([uploaded_file, prompt])
 
         try:
             client.files.delete(name=uploaded_file.name)
@@ -196,12 +266,16 @@ def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str
 
         hasil_teks = response.text
         if not hasil_teks or not hasil_teks.strip():
-            raise ValueError(f"Tidak ada teks yang bisa diekstrak dari '{display_name}'.")
+            raise ValueError(
+                f"Tidak ada teks yang bisa diekstrak dari '{display_name}'."
+            )
 
         return hasil_teks
 
     except Exception as e:
-        raise RuntimeError(f"Gagal mengekstrak '{display_name}' via Google File API: {str(e)}")
+        raise RuntimeError(
+            f"Gagal mengekstrak '{display_name}' via Google File API: {str(e)}"
+        )
 
 
 # ==========================================
@@ -270,6 +344,66 @@ def format_dataframe_as_text(df, sheet_name: str = "Data") -> str:
     header = " | ".join(str(c) for c in df.columns)
     rows = [" | ".join(str(v) for v in row) for row in df.itertuples(index=False)]
     return f"Sheet: {sheet_name}\n" + header + "\n" + "\n".join(rows)
+
+
+def describe_youtube_video(youtube_url: str) -> str:
+    """
+    Minta Gemini menonton video YouTube LANGSUNG dari URL-nya (tanpa perlu
+    download/upload file). Best-effort: kalau gagal (fitur berubah, video
+    private, dsb), kembalikan string kosong -- pemanggil tinggal fallback
+    ke judul+deskripsi manual saja.
+    """
+    try:
+        prompt = (
+            "Tonton video ini dan buatkan ringkasan konten yang detail: topik utama, "
+            "langkah-langkah atau poin penting yang dibahas, dan konteks lain yang "
+            "relevan untuk pencarian internal perusahaan."
+        )
+        contents = types.Content(
+            parts=[
+                types.Part(file_data=types.FileData(file_uri=youtube_url)),
+                types.Part(text=prompt),
+            ]
+        )
+        response = _generate_with_fallback(contents)
+        return response.text or ""
+    except Exception:
+        return ""
+
+
+def extract_pdf_text_local(file_path: str) -> str:
+    """
+    Ekstraksi teks PDF LOKAL (pdfplumber) -- gratis, instan, TIDAK memakai kuota
+    Gemini sama sekali. Cocok untuk PDF teks digital biasa (bukan hasil scan).
+    Return string kosong kalau PDF-nya scan/gambar (tidak ada teks terbaca).
+    """
+    import pdfplumber
+
+    parts = []
+    with pdfplumber.open(file_path) as pdf:
+        for i, page in enumerate(pdf.pages):
+            text = page.extract_text() or ""
+            if text.strip():
+                parts.append(f"Halaman {i + 1}:\n{text}")
+    return "\n\n".join(parts)
+
+
+def extract_pdf_ocr_local(file_path: str) -> str:
+    """
+    OCR lokal pakai Tesseract -- gratis, tanpa API, tanpa kuota Gemini sama sekali.
+    Dipakai khusus untuk PDF hasil scan/gambar yang tidak punya teks digital
+    (extract_pdf_text_local akan kosong untuk PDF jenis ini).
+    """
+    import pytesseract
+    from pdf2image import convert_from_path
+
+    images = convert_from_path(file_path)
+    parts = []
+    for i, image in enumerate(images):
+        text = pytesseract.image_to_string(image, lang="ind+eng")
+        if text.strip():
+            parts.append(f"Halaman {i + 1}:\n{text}")
+    return "\n\n".join(parts)
 
 
 def extract_rtf_text(file_path: str) -> str:

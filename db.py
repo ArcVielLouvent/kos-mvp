@@ -166,14 +166,18 @@ def insert_document_with_chunks(
                 storage_path, file_bytes, {"upsert": "true"}
             )
             signed = client.storage.from_("company-files").create_signed_url(
-                storage_path,
-                3600 * 24 * 7,  # berlaku 7 hari, di-generate ulang tiap dibuka
+                storage_path, 3600 * 24 * 7  # berlaku 7 hari, di-generate ulang tiap dibuka
             )
             file_url = signed.get("signedURL") or signed.get("signed_url")
-        except Exception:
-            file_url = (
-                None  # upload storage gagal tidak boleh menggagalkan seluruh proses
+        except Exception as e:
+            # Sengaja TIDAK ditelan diam-diam -- tampilkan biar bisa didiagnosis.
+            # Dokumen tetap tersimpan (bisa dicari & dijawab AI), cuma tanpa file
+            # asli untuk didownload.
+            st.warning(
+                f"'{title}': gagal upload ke Storage, dokumen tetap tersimpan "
+                f"tapi TANPA file asli untuk didownload. Penyebab: {e}"
             )
+            file_url = None
 
     preview = chunks[0][:2000] if chunks else ""
 
@@ -282,7 +286,7 @@ def list_child_folders(company_id: str, parent_path: str) -> list:
     children = set()
     for path in all_paths:
         if path.startswith(parent_path) and path != parent_path:
-            first_segment = path[len(parent_path) :].split("/")[0]
+            first_segment = path[len(parent_path):].split("/")[0]
             if first_segment:
                 children.add(parent_path + first_segment + "/")
     return sorted(children)
@@ -341,10 +345,10 @@ def get_chat_messages(session_id: str):
     return r.data
 
 
-def add_chat_message(session_id: str, role: str, content: str):
+def add_chat_message(session_id: str, role: str, content: str, sources: list = None):
     client = get_client()
     client.table("chat_messages").insert(
-        {"session_id": session_id, "role": role, "content": content}
+        {"session_id": session_id, "role": role, "content": content, "sources": sources or []}
     ).execute()
     client.table("chat_sessions").update({"updated_at": "now()"}).eq(
         "id", session_id

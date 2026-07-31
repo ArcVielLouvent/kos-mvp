@@ -33,6 +33,87 @@ def is_file_request(question: str) -> bool:
     return any(kw in q for kw in keywords)
 
 
+def filter_docs_by_intent(question: str, docs: list) -> list:
+    """
+    Kalau user secara eksplisit minta VIDEO, saring hasil pencarian supaya
+    cuma dokumen bertipe Video YouTube yang ditampilkan -- mencegah dokumen
+    lain (xlsx/pdf) yang kebetulan mirip kata kunci ikut nongol sebagai
+    jawaban/tombol yang tidak relevan.
+    """
+    video_keywords = ["video", "youtube", "tonton", "nonton", "putar"]
+    q = question.lower()
+    if any(kw in q for kw in video_keywords):
+        video_docs = [
+            d for d in docs if d.get("metadata", {}).get("tipe_file") == "Video YouTube"
+        ]
+        if video_docs:
+            return video_docs
+    return docs
+
+
+def is_generate_request(question: str) -> bool:
+    """Deteksi niat: user minta dokumen/form/surat/SOP DIBUATKAN, bukan dicari."""
+    keywords = [
+        "buatkan",
+        "buat draf",
+        "buat dokumen",
+        "buatkan dokumen",
+        "susun dokumen",
+        "susunkan",
+        "bikinkan",
+        "bikin dokumen",
+        "buat form",
+        "buatkan form",
+        "buat formulir",
+        "buatkan formulir",
+        "buat sop",
+        "buatkan sop",
+        "buat surat",
+        "buatkan surat",
+        "buat kebijakan",
+        "buatkan kebijakan",
+        "generate dokumen",
+        "generate draf",
+        "apakah anda bisa membuatkan",
+        "bisa buatkan",
+        "bisa dibuatkan",
+    ]
+    q = question.lower()
+    return any(kw in q for kw in keywords)
+
+
+def infer_doc_type(question: str) -> str:
+    """Tebak jenis dokumen dari kata kunci di pertanyaan -- default 'Lainnya'."""
+    q = question.lower()
+    if "sop" in q:
+        return "SOP"
+    if "form" in q or "formulir" in q or "checklist" in q or "check list" in q:
+        return "Form/Checklist"
+    if "surat" in q:
+        return "Surat"
+    if "kebijakan" in q:
+        return "Kebijakan"
+    return "Lainnya"
+
+
+def is_analysis_request(question: str) -> bool:
+    """Deteksi niat: user minta analisis/rekomendasi dari data terstruktur (xlsx)."""
+    keywords = [
+        "analisis",
+        "analisa",
+        "rekomendasi",
+        "rekomendasikan",
+        "siapa yang cocok",
+        "cocok jadi",
+        "berdasarkan data",
+        "urutkan berdasarkan",
+        "filter data",
+        "dari data yang ada",
+    ]
+    q = question.lower()
+    return any(kw in q for kw in keywords)
+
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -339,6 +420,36 @@ def extract_xlsx_text(file_path: str) -> list:
     return sheets
 
 
+def extract_xlsx_structured(file_path: str) -> list:
+    """
+    Kembalikan data XLSX dalam bentuk terstruktur untuk kebutuhan analisis
+    (bukan cuma teks). Baris pertama tiap sheet dianggap header/nama kolom.
+    Format: [{"sheet": "nama", "rows": [{"kolom1": val, ...}, ...]}, ...]
+    """
+    import openpyxl
+
+    wb = openpyxl.load_workbook(file_path, data_only=True)
+    result = []
+
+    for sheet in wb.worksheets:
+        all_rows = list(sheet.iter_rows(values_only=True))
+        if len(all_rows) < 2:
+            continue
+        header = [
+            str(h) if h is not None else f"col_{i}" for i, h in enumerate(all_rows[0])
+        ]
+        rows = []
+        for row in all_rows[1:]:
+            if any(cell is not None for cell in row):
+                rows.append(
+                    {header[i]: row[i] for i in range(min(len(header), len(row)))}
+                )
+        if rows:
+            result.append({"sheet": sheet.title, "rows": rows})
+
+    return result
+
+
 def format_dataframe_as_text(df, sheet_name: str = "Data") -> str:
     """Ubah pandas DataFrame (mis. dari CSV) jadi teks tabel utuh, tanpa dipotong per baris."""
     header = " | ".join(str(c) for c in df.columns)
@@ -412,3 +523,325 @@ def extract_rtf_text(file_path: str) -> str:
     with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
         raw = f.read()
     return rtf_to_text(raw)
+
+
+# ==========================================
+# GENERATE KUIS TRAINING (dari isi dokumen)
+# ==========================================
+def generate_quiz_questions(content: str, num_questions: int = 5) -> list:
+    """
+    Minta Gemini bikin soal pilihan ganda dari isi dokumen SOP/training.
+    Return list of dict: [{question, options:[4 opsi], correct_index}, ...]
+    Format dipaksa JSON murni lewat instruksi eksplisit di prompt.
+    """
+    prompt = f"""Kamu adalah pembuat soal ujian untuk training karyawan baru.
+Berdasarkan dokumen di bawah, buatkan {num_questions} soal pilihan ganda (4 opsi jawaban)
+yang menguji pemahaman terhadap SOP/prosedur di dokumen ini.
+
+ATURAN KETAT:
+- Jawab HANYA dengan JSON murni, tanpa teks penjelasan apa pun di luar JSON.
+- Jangan pakai markdown code block (tanpa ```json).
+- Format persis seperti ini:
+[
+  {{"question": "...", "options": ["A", "B", "C", "D"], "correct_index": 0}},
+  ...
+]
+- correct_index adalah index (0-3) dari jawaban yang benar di array "options".
+- Soal harus berdasarkan isi dokumen, bukan pengetahuan umum di luar dokumen.
+
+=== ISI DOKUMEN ===
+{content[:6000]}
+=== AKHIR DOKUMEN ===
+"""
+    response = _generate_with_fallback(prompt)
+    raw = (response.text or "").strip()
+
+    # Bersihkan kalau model tetap membungkus dengan markdown code block
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+
+    import json
+
+    questions = json.loads(raw)
+
+    # Validasi minimal supaya tidak menyimpan data rusak ke database
+    valid = []
+    for q in questions:
+        if (
+            isinstance(q, dict)
+            and "question" in q
+            and "options" in q
+            and len(q["options"]) == 4
+            and "correct_index" in q
+            and 0 <= q["correct_index"] <= 3
+        ):
+            valid.append(q)
+    return valid
+
+
+# ==========================================
+# GENERATE DOKUMEN AI (draf, BUKAN dokumen resmi)
+# ==========================================
+DOC_TYPE_INSTRUCTIONS = {
+    "SOP": "Format sebagai SOP: tujuan, ruang lingkup, lalu langkah-langkah bernomor yang jelas dan actionable.",
+    "Form/Checklist": "Format sebagai daftar item/kolom isian singkat, cocok dijadikan tabel formulir.",
+    "Surat": "Format sebagai surat resmi: kop (placeholder), tanggal, salam pembuka, isi, salam penutup, tempat tanda tangan.",
+    "Kebijakan": "Format sebagai pernyataan kebijakan: latar belakang, ketentuan, sanksi/konsekuensi kalau relevan.",
+    "Lainnya": "Format bebas namun tetap terstruktur dengan heading yang jelas.",
+}
+
+
+def generate_draft_document(
+    topic: str, doc_type: str = "Lainnya", company_context: str = ""
+) -> str:
+    """
+    Buat draf dokumen berdasarkan pengetahuan umum AI, disesuaikan jenis dokumen
+    dan konteks perusahaan kalau ada. SELALU dilabeli sebagai draf.
+    """
+    instruction = DOC_TYPE_INSTRUCTIONS.get(doc_type, DOC_TYPE_INSTRUCTIONS["Lainnya"])
+    prompt = f"""Kamu diminta membuat DRAF dokumen kerja untuk sebuah perusahaan.
+
+Jenis dokumen: {doc_type}
+Topik: {topic}
+Konteks perusahaan (kalau ada): {company_context or "Tidak ada konteks tambahan."}
+
+Instruksi format: {instruction}
+
+ATURAN WAJIB:
+- Di baris PALING ATAS, tulis persis: "[DRAF AI -- PERLU DIREVIEW SEBELUM DIGUNAKAN RESMI]"
+- JANGAN mengarang detail teknis spesifik (angka, merek alat, dsb) yang tidak bisa
+  dipastikan kebenarannya -- gunakan placeholder seperti "[isi sesuai SOP internal]".
+"""
+    response = _generate_with_fallback(prompt)
+    return response.text or ""
+
+
+def create_docx_bytes(title: str, content: str, logo_bytes: bytes = None) -> bytes:
+    """Ubah teks jadi file .docx dari nol (tanpa template), opsional logo di kop."""
+    from docx import Document
+    from docx.shared import Inches
+    import io
+
+    doc = Document()
+    if logo_bytes:
+        try:
+            doc.add_picture(io.BytesIO(logo_bytes), width=Inches(1.2))
+        except Exception:
+            pass  # logo korup/format tidak didukung -> lanjut tanpa logo, jangan gagalkan seluruh generate
+    doc.add_heading(title, level=1)
+    for line in content.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("[DRAF AI"):
+            p = doc.add_paragraph()
+            run = p.add_run(line)
+            run.bold = True
+        elif line.startswith("#"):
+            doc.add_heading(line.lstrip("#").strip(), level=2)
+        else:
+            doc.add_paragraph(line)
+
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    return buffer.getvalue()
+
+
+def create_docx_from_template(template_bytes: bytes, title: str, content: str) -> bytes:
+    """
+    Sisipkan konten AI ke DALAM template .docx yang sudah diupload admin (berisi
+    kop/logo/footer perusahaan) -- bukan bikin dokumen baru dari nol. Konten
+    ditambahkan di akhir isi template, otomatis ikut font/style template.
+    """
+    from docx import Document
+    import io
+
+    doc = Document(io.BytesIO(template_bytes))
+    doc.add_heading(title, level=1)
+    for line in content.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("[DRAF AI"):
+            p = doc.add_paragraph()
+            run = p.add_run(line)
+            run.bold = True
+        elif line.startswith("#"):
+            doc.add_heading(line.lstrip("#").strip(), level=2)
+        else:
+            doc.add_paragraph(line)
+
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    return buffer.getvalue()
+
+
+def create_pdf_bytes(title: str, content: str, logo_bytes: bytes = None) -> bytes:
+    """Ubah teks jadi file .pdf sungguhan, opsional logo di kop."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import cm
+    import io
+
+    styles = getSampleStyleSheet()
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+        leftMargin=2 * cm,
+        rightMargin=2 * cm,
+    )
+    story = []
+    if logo_bytes:
+        try:
+            story.append(Image(io.BytesIO(logo_bytes), width=3 * cm, height=3 * cm))
+            story.append(Spacer(1, 12))
+        except Exception:
+            pass
+    story.append(Paragraph(title, styles["Title"]))
+    story.append(Spacer(1, 16))
+    for line in content.split("\n"):
+        line = line.strip()
+        if not line:
+            story.append(Spacer(1, 8))
+            continue
+        style = (
+            styles["Heading2"]
+            if line.startswith("[DRAF AI") or line.startswith("#")
+            else styles["Normal"]
+        )
+        story.append(Paragraph(line.lstrip("#").strip(), style))
+    doc.build(story)
+    return buffer.getvalue()
+
+
+def create_xlsx_bytes(title: str, rows: list) -> bytes:
+    """
+    Bikin file .xlsx dari list of dict (baris data). Dipakai untuk Form/Checklist
+    kosong ATAU hasil kompilasi data nyata (daftar pelamar, rekap keuangan, dsb).
+    """
+    import openpyxl
+    import io
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title[:31] if title else "Data"  # Excel batasi nama sheet 31 karakter
+
+    if rows:
+        headers = list(rows[0].keys())
+        ws.append(headers)
+        for row in rows:
+            ws.append([row.get(h, "") for h in headers])
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+# ==========================================
+# GENERATE DARI DATA KOS (kompilasi data NYATA, bukan karangan AI)
+# ==========================================
+def determine_extraction_columns(user_request: str) -> list:
+    """
+    Tanya AI: berdasarkan permintaan user, kolom apa saja yang seharusnya ada
+    di tabel hasil? Contoh: "daftar pelamar posisi marketing" -> ["Nama", "Posisi
+    Dilamar", "Pendidikan", "Pengalaman (tahun)"].
+    """
+    prompt = f"""Permintaan pengguna: "{user_request}"
+
+Tentukan kolom-kolom apa saja yang seharusnya ada di tabel hasil kompilasi data.
+Jawab HANYA dengan JSON array of string, tanpa markdown code block, contoh:
+["Nama", "Posisi Dilamar", "Pengalaman (tahun)"]
+"""
+    response = _generate_with_fallback(prompt)
+    raw = (response.text or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+    import json
+
+    return json.loads(raw)
+
+
+def extract_fields_from_document(
+    content: str, columns: list, source_title: str
+) -> dict:
+    """
+    Ekstrak nilai kolom yang diminta DARI ISI DOKUMEN NYATA (bukan mengarang).
+    Kalau info tidak ada di dokumen, isi "-" -- JANGAN ditebak.
+    """
+    prompt = f"""Dokumen sumber ("{source_title}"):
+{content[:4000]}
+
+Ekstrak nilai untuk kolom berikut PERSIS dari isi dokumen di atas: {columns}
+Kalau suatu info tidak disebutkan di dokumen, isi nilainya dengan "-" -- JANGAN menebak/mengarang.
+
+Jawab HANYA dengan JSON object, tanpa markdown code block, contoh:
+{{"Nama": "...", "Posisi Dilamar": "..."}}
+"""
+    response = _generate_with_fallback(prompt)
+    raw = (response.text or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+    import json
+
+    return json.loads(raw)
+
+
+# ==========================================
+# ANALISIS DATA (AI cuma ekstrak kriteria, TIDAK menulis/menjalankan kode)
+# ==========================================
+def extract_analysis_criteria(question: str, columns: list) -> dict:
+    """
+    AI menerjemahkan pertanyaan bebas jadi kriteria terstruktur (JSON).
+    Eksekusi filter dilakukan oleh kode Python kita sendiri (bukan AI) --
+    supaya tidak ada risiko AI menjalankan kode sembarangan.
+
+    Return dict:
+    {
+      "missing_info": null atau string pertanyaan klarifikasi,
+      "filters": [{"column": "...", "operator": ">=|<=|==|contains", "value": "..."}],
+      "sort_by": "nama_kolom atau null",
+      "sort_desc": true/false
+    }
+    """
+    prompt = f"""Kolom yang tersedia di data: {columns}
+
+Pertanyaan pengguna: "{question}"
+
+Terjemahkan pertanyaan ini jadi kriteria filter terstruktur. Jawab HANYA dengan JSON murni,
+tanpa markdown code block, format persis:
+{{
+  "missing_info": null,
+  "filters": [{{"column": "nama_kolom", "operator": ">=", "value": "1"}}],
+  "sort_by": null,
+  "sort_desc": false
+}}
+
+Operator yang valid HANYA: ">=", "<=", "==", "contains".
+Kalau pertanyaan terlalu ambigu / kriteria penting belum disebutkan (misal user cuma
+bilang "kehadiran bagus" tanpa angka), isi "missing_info" dengan pertanyaan klarifikasi
+singkat dalam Bahasa Indonesia, dan biarkan "filters" jadi array kosong.
+"""
+    response = _generate_with_fallback(prompt)
+    raw = (response.text or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+
+    import json
+
+    return json.loads(raw)

@@ -88,7 +88,9 @@ def update_password(email: str, new_password: str):
 # ==========================================
 # KARYAWAN
 # ==========================================
-def add_users_bulk(emails: list, folder_access: str, company_id: str) -> dict:
+def add_users_bulk(
+    emails: list, folder_access: str, company_id: str, position_title: str = None
+) -> dict:
     client = get_client()
     folder_access = normalize_folder(folder_access)
 
@@ -110,6 +112,7 @@ def add_users_bulk(emails: list, folder_access: str, company_id: str) -> dict:
                 "password": hash_password(temp_pw),
                 "company_id": company_id,
                 "must_change_password": True,
+                "position_title": (position_title or "").strip() or None,
             }
         )
 
@@ -117,6 +120,35 @@ def add_users_bulk(emails: list, folder_access: str, company_id: str) -> dict:
         client.table("users").upsert(records, on_conflict="email").execute()
 
     return temp_passwords
+
+
+def add_admin(
+    email: str,
+    folder_access: str,
+    permission_level: str,
+    company_id: str,
+    position_title: str = None,
+) -> str:
+    """Tambah akun Admin baru (bukan Karyawan) -- khusus dipanggil SuperAdmin/Admin crud."""
+    client = get_client()
+    folder_access = normalize_folder(folder_access)
+    create_folder(company_id, folder_access)
+
+    temp_pw = secrets.token_urlsafe(6)
+    client.table("users").upsert(
+        {
+            "email": email.strip().lower(),
+            "role": "Admin",
+            "folder_access": folder_access,
+            "permission_level": permission_level,
+            "password": hash_password(temp_pw),
+            "company_id": company_id,
+            "must_change_password": True,
+            "position_title": (position_title or "").strip() or None,
+        },
+        on_conflict="email",
+    ).execute()
+    return temp_pw
 
 
 def get_unique_folders(company_id: str) -> list:
@@ -147,6 +179,7 @@ def insert_document_with_chunks(
     file_bytes: bytes = None,
     original_filename: str = None,
     external_url: str = None,
+    structured_data: list = None,
 ) -> str:
     """
     Simpan 1 baris di `documents` (file utuh, muncul 1x di File Manager, ada link
@@ -166,7 +199,8 @@ def insert_document_with_chunks(
                 storage_path, file_bytes, {"upsert": "true"}
             )
             signed = client.storage.from_("company-files").create_signed_url(
-                storage_path, 3600 * 24 * 7  # berlaku 7 hari, di-generate ulang tiap dibuka
+                storage_path,
+                3600 * 24 * 7,  # berlaku 7 hari, di-generate ulang tiap dibuka
             )
             file_url = signed.get("signedURL") or signed.get("signed_url")
         except Exception as e:
@@ -191,6 +225,7 @@ def insert_document_with_chunks(
                 "metadata": metadata or {},
                 "company_id": company_id,
                 "file_url": file_url,
+                "structured_data": structured_data,
             }
         )
         .execute()
@@ -286,7 +321,7 @@ def list_child_folders(company_id: str, parent_path: str) -> list:
     children = set()
     for path in all_paths:
         if path.startswith(parent_path) and path != parent_path:
-            first_segment = path[len(parent_path):].split("/")[0]
+            first_segment = path[len(parent_path) :].split("/")[0]
             if first_segment:
                 children.add(parent_path + first_segment + "/")
     return sorted(children)
@@ -348,7 +383,12 @@ def get_chat_messages(session_id: str):
 def add_chat_message(session_id: str, role: str, content: str, sources: list = None):
     client = get_client()
     client.table("chat_messages").insert(
-        {"session_id": session_id, "role": role, "content": content, "sources": sources or []}
+        {
+            "session_id": session_id,
+            "role": role,
+            "content": content,
+            "sources": sources or [],
+        }
     ).execute()
     client.table("chat_sessions").update({"updated_at": "now()"}).eq(
         "id", session_id
@@ -416,3 +456,280 @@ def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
         client.table("users").update({"folder_access": updated_path}).eq(
             "email", u["email"]
         ).execute()
+
+
+# ==========================================
+# DIREKTORI KARYAWAN (folder-scoped: admin lihat yang di bawah cakupannya)
+# ==========================================
+def list_managed_users(company_id: str, viewer_folder_access: str, viewer_role: str):
+    """
+    SuperAdmin -> lihat semua user di perusahaan.
+    Admin/Karyawan (kalau dipanggil) -> cuma user yang folder_access-nya
+    berada DI DALAM cakupan folder viewer.
+    """
+    client = get_client()
+    query = (
+        client.table("users")
+        .select(
+            "email, role, folder_access, position_title, permission_level, created_at"
+        )
+        .eq("company_id", company_id)
+        .order("created_at", desc=True)
+    )
+    if viewer_role != "SuperAdmin":
+        query = query.like("folder_access", f"{viewer_folder_access}%")
+    r = query.execute()
+    return r.data
+
+
+def update_user_position(email: str, position_title: str):
+    client = get_client()
+    client.table("users").update(
+        {"position_title": (position_title or "").strip() or None}
+    ).eq("email", email.strip().lower()).execute()
+
+
+def update_admin_permission(email: str, permission_level: str):
+    client = get_client()
+    client.table("users").update({"permission_level": permission_level}).eq(
+        "email", email.strip().lower()
+    ).execute()
+
+
+# ==========================================
+# LAPOR KERJAAN KARYAWAN
+# ==========================================
+def add_report(
+    user_email: str,
+    company_id: str,
+    content: str = None,
+    media_url: str = None,
+    media_type: str = "text",
+):
+    client = get_client()
+    client.table("reports").insert(
+        {
+            "user_email": user_email.strip().lower(),
+            "company_id": company_id,
+            "content": content,
+            "media_url": media_url,
+            "media_type": media_type,
+        }
+    ).execute()
+
+
+def get_user_reports(user_email: str):
+    client = get_client()
+    r = (
+        client.table("reports")
+        .select("*")
+        .eq("user_email", user_email.strip().lower())
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return r.data
+
+
+# ==========================================
+# SISTEM KUIS TRAINING ONBOARDING
+# ==========================================
+def create_quiz(
+    company_id: str,
+    folder_path: str,
+    title: str,
+    questions: list,
+    source_document_id: str = None,
+    passing_score: int = 70,
+) -> str:
+    client = get_client()
+    r = (
+        client.table("quizzes")
+        .insert(
+            {
+                "company_id": company_id,
+                "folder_path": normalize_folder(folder_path),
+                "title": title,
+                "questions": questions,
+                "source_document_id": source_document_id,
+                "passing_score": passing_score,
+            }
+        )
+        .execute()
+    )
+    return r.data[0]["id"]
+
+
+def list_quizzes_for_folder(company_id: str, folder_access: str):
+    """Kuis yang tersedia untuk karyawan sesuai cakupan folder aksesnya."""
+    client = get_client()
+    r = (
+        client.table("quizzes")
+        .select("id, title, folder_path, passing_score, created_at")
+        .eq("company_id", company_id)
+        .like("folder_path", f"{folder_access}%")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return r.data
+
+
+def get_quiz(quiz_id: str):
+    client = get_client()
+    r = client.table("quizzes").select("*").eq("id", quiz_id).execute()
+    return r.data[0] if r.data else None
+
+
+def save_quiz_attempt(
+    quiz_id: str,
+    user_email: str,
+    company_id: str,
+    score: int,
+    total: int,
+    passed: bool,
+    answers: list,
+):
+    client = get_client()
+    client.table("quiz_attempts").insert(
+        {
+            "quiz_id": quiz_id,
+            "user_email": user_email.strip().lower(),
+            "company_id": company_id,
+            "score": score,
+            "total": total,
+            "passed": passed,
+            "answers": answers,
+        }
+    ).execute()
+
+
+def get_user_quiz_attempts(user_email: str):
+    client = get_client()
+    r = (
+        client.table("quiz_attempts")
+        .select("*, quizzes(title)")
+        .eq("user_email", user_email.strip().lower())
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return r.data
+
+
+# ==========================================
+# DRAF DOKUMEN AI (audit trail, TIDAK masuk RAG)
+# ==========================================
+def save_ai_draft(company_id: str, requested_by: str, title: str, content: str) -> str:
+    client = get_client()
+    r = (
+        client.table("ai_drafts")
+        .insert(
+            {
+                "company_id": company_id,
+                "requested_by": requested_by,
+                "title": title,
+                "content": content,
+            }
+        )
+        .execute()
+    )
+    return r.data[0]["id"]
+
+
+# ==========================================
+# ANALISIS DATA -- dokumen dengan data terstruktur (XLSX)
+# ==========================================
+def list_structured_documents(company_id: str, folder_prefix: str = "/"):
+    """Dokumen yang punya structured_data (hasil upload XLSX) -- untuk halaman Analisis Data."""
+    client = get_client()
+    r = (
+        client.table("documents")
+        .select("id, title, folder_path, structured_data")
+        .eq("company_id", company_id)
+        .like("folder_path", f"{folder_prefix}%")
+        .not_.is_("structured_data", "null")
+        .execute()
+    )
+    return r.data
+
+
+# ==========================================
+# BRANDING PERUSAHAAN (logo, template surat)
+# ==========================================
+def get_company_branding(company_id: str) -> dict:
+    client = get_client()
+    r = (
+        client.table("companies")
+        .select("logo_url, docx_template_url")
+        .eq("id", company_id)
+        .execute()
+    )
+    return r.data[0] if r.data else {}
+
+
+def upload_company_logo(company_id: str, file_bytes: bytes, filename: str) -> str:
+    client = get_client()
+    storage_path = f"{company_id}/branding/logo_{filename}"
+    client.storage.from_("company-files").upload(
+        storage_path, file_bytes, {"upsert": "true"}
+    )
+    signed = client.storage.from_("company-files").create_signed_url(
+        storage_path, 3600 * 24 * 365
+    )
+    url = signed.get("signedURL") or signed.get("signed_url")
+    client.table("companies").update({"logo_url": url}).eq("id", company_id).execute()
+    return url
+
+
+def upload_company_template(company_id: str, file_bytes: bytes, filename: str) -> str:
+    client = get_client()
+    storage_path = f"{company_id}/branding/template_{filename}"
+    client.storage.from_("company-files").upload(
+        storage_path, file_bytes, {"upsert": "true"}
+    )
+    signed = client.storage.from_("company-files").create_signed_url(
+        storage_path, 3600 * 24 * 365
+    )
+    url = signed.get("signedURL") or signed.get("signed_url")
+    client.table("companies").update({"docx_template_url": url}).eq(
+        "id", company_id
+    ).execute()
+    return url
+
+
+def fetch_file_bytes(url: str) -> bytes:
+    """Ambil isi file dari URL (Supabase signed URL) sebagai bytes -- dipakai untuk baca logo/template kembali."""
+    import requests
+
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+    return r.content
+
+
+# ==========================================
+# UPLOAD MEDIA LAPORAN KERJAAN (dipindah dari app.py -> jaga app.py tidak bicara ke Supabase langsung)
+# ==========================================
+def upload_report_media(
+    company_id: str, user_email: str, file_bytes: bytes, filename: str
+) -> str:
+    client = get_client()
+    storage_path = f"{company_id}/reports/{user_email}/{filename}"
+    client.storage.from_("company-files").upload(
+        storage_path, file_bytes, {"upsert": "true"}
+    )
+    signed = client.storage.from_("company-files").create_signed_url(
+        storage_path, 3600 * 24 * 30
+    )
+    return signed.get("signedURL") or signed.get("signed_url")
+
+
+def get_full_document_content(document_id: str) -> str:
+    """Gabungkan SEMUA chunk milik 1 dokumen (urut) -- untuk kebutuhan ekstraksi
+    data yang butuh isi lengkap, bukan cuma chunk paling mirip dari vector search."""
+    client = get_client()
+    r = (
+        client.table("document_chunks")
+        .select("content, chunk_index")
+        .eq("document_id", document_id)
+        .order("chunk_index")
+        .execute()
+    )
+    return "\n".join(c["content"] for c in r.data)

@@ -57,7 +57,8 @@ st.markdown(
         .st-key-kos-row-chathist button, .st-key-kos-row-chathist button p,
         .st-key-kos-row-folders button, .st-key-kos-row-folders button p,
         .st-key-kos-row-files button, .st-key-kos-row-files button p,
-        .st-key-kos-row-picker button, .st-key-kos-row-picker button p {
+        .st-key-kos-row-directory-chat button, .st-key-kos-row-directory-chat button p,
+        [class*="st-key-kos-row-picker"] button, [class*="st-key-kos-row-picker"] button p {
             background: transparent !important;
             border: none !important;
             box-shadow: none !important;
@@ -70,7 +71,7 @@ st.markdown(
             width: 100% !important;
         }
         .st-key-kos-row-chathist button:hover, .st-key-kos-row-folders button:hover,
-        .st-key-kos-row-files button:hover, .st-key-kos-row-picker button:hover {
+        .st-key-kos-row-files button:hover, [class*="st-key-kos-row-picker"] button:hover {
             background: var(--kos-hover) !important;
         }
         .st-key-kos-row-files button:disabled { color: #a1a1aa !important; opacity: 1 !important; }
@@ -78,14 +79,14 @@ st.markdown(
         div[data-testid="stVerticalBlock"].st-key-kos-row-chathist,
         div[data-testid="stVerticalBlock"].st-key-kos-row-folders,
         div[data-testid="stVerticalBlock"].st-key-kos-row-files,
-        div[data-testid="stVerticalBlock"].st-key-kos-row-picker {
+        div[data-testid="stVerticalBlock"][class*="st-key-kos-row-picker"] {
             background: transparent !important;
             border: none !important;
             box-shadow: none !important;
             padding: 0 !important;
         }
 
-        .st-key-kos-crumb button {
+        [class*="st-key-kos-crumb"] button {
             background: transparent !important;
             border: 1px solid var(--kos-border) !important;
             box-shadow: none !important;
@@ -95,7 +96,7 @@ st.markdown(
             color: var(--kos-muted) !important;
             width: auto !important;
         }
-        .st-key-kos-crumb button:hover {
+        [class*="st-key-kos-crumb"] button:hover {
             color: #fff !important;
             border-color: rgba(255,255,255,0.24) !important;
         }
@@ -154,6 +155,9 @@ for key, default in [
     ("current_session_id", None),
     ("fm_current_path", "/"),
     ("current_menu", "Chat KOS"),
+    ("directory_selected_email", None),
+    ("directory_chat_selected", None),
+    ("last_draft", None),
     ("flash", None),
 ]:
     if key not in st.session_state:
@@ -169,6 +173,20 @@ def logout():
 
 def flash(message: str):
     st.session_state.flash = message
+
+
+def can_write(user: dict) -> bool:
+    """SuperAdmin selalu bisa tulis. Admin cuma bisa kalau permission_level='crud'."""
+    if user["role"] == "SuperAdmin":
+        return True
+    if user["role"] == "Admin":
+        return user.get("permission_level", "crud") == "crud"
+    return False
+
+
+def is_admin_tier(user: dict) -> bool:
+    """SuperAdmin atau Admin (untuk gating menu/halaman, bukan gating tulis)."""
+    return user["role"] in ("SuperAdmin", "Admin")
 
 
 # ==========================================
@@ -220,7 +238,7 @@ def landing_page():
 
                 st.write("")
                 if st.button(
-                    "Daftar perusahaan baru (Admin)",
+                    "Daftar perusahaan baru (SuperAdmin)",
                     use_container_width=True,
                     icon=":material/domain_add:",
                 ):
@@ -426,7 +444,185 @@ def chat_page():
                     used_sources = []
                     seen = set()
 
-                    if ai.is_file_request(question):
+                    if ai.is_generate_request(question):
+                        # Niat: minta dokumen DIBUATKAN (bukan dicari)
+                        if not can_write(user):
+                            answer = "Membuat dokumen baru butuh akses tulis (CRUD). Hubungi Admin/SuperAdmin Anda."
+                            st.write(answer)
+                        else:
+                            with st.spinner("AI sedang menyusun draf..."):
+                                doc_type = ai.infer_doc_type(question)
+                                draft_content = ai.generate_draft_document(
+                                    question, doc_type
+                                )
+                            answer = draft_content
+                            st.warning(
+                                "Draf berdasarkan pengetahuan umum AI -- BUKAN dokumen resmi. "
+                                "Review dulu sebelum dipakai."
+                            )
+                            st.write(draft_content)
+                            db.save_ai_draft(
+                                user["company_id"],
+                                user["email"],
+                                question[:60],
+                                draft_content,
+                            )
+
+                            branding = db.get_company_branding(user["company_id"])
+                            logo_bytes = None
+                            if branding.get("logo_url"):
+                                try:
+                                    logo_bytes = db.fetch_file_bytes(
+                                        branding["logo_url"]
+                                    )
+                                except Exception:
+                                    logo_bytes = None
+
+                            title_for_file = question[:50].strip() or "Dokumen"
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if branding.get("docx_template_url"):
+                                    try:
+                                        template_bytes = db.fetch_file_bytes(
+                                            branding["docx_template_url"]
+                                        )
+                                        docx_bytes = ai.create_docx_from_template(
+                                            template_bytes,
+                                            title_for_file,
+                                            draft_content,
+                                        )
+                                    except Exception:
+                                        docx_bytes = ai.create_docx_bytes(
+                                            title_for_file, draft_content, logo_bytes
+                                        )
+                                else:
+                                    docx_bytes = ai.create_docx_bytes(
+                                        title_for_file, draft_content, logo_bytes
+                                    )
+                                st.download_button(
+                                    "Download .docx",
+                                    docx_bytes,
+                                    file_name=f"{title_for_file}.docx",
+                                    key=f"gen_docx_{st.session_state.current_session_id}_{len(question)}",
+                                    icon=":material/download:",
+                                )
+                            with col2:
+                                pdf_bytes = ai.create_pdf_bytes(
+                                    title_for_file, draft_content, logo_bytes
+                                )
+                                st.download_button(
+                                    "Download .pdf",
+                                    pdf_bytes,
+                                    file_name=f"{title_for_file}.pdf",
+                                    key=f"gen_pdf_{st.session_state.current_session_id}_{len(question)}",
+                                    icon=":material/download:",
+                                )
+
+                    elif ai.is_analysis_request(question):
+                        # Niat: analisis/rekomendasi dari data terstruktur (xlsx)
+                        structured_docs = db.list_structured_documents(
+                            user["company_id"], user["folder_access"]
+                        )
+                        if not structured_docs:
+                            answer = "Tidak ada data terstruktur (XLSX) yang bisa dianalisis di folder akses Anda."
+                            st.write(answer)
+                        else:
+                            q_lower = question.lower()
+                            best_doc = next(
+                                (
+                                    d
+                                    for d in structured_docs
+                                    if any(
+                                        w in q_lower
+                                        for w in d["title"].lower().split()
+                                        if len(w) > 3
+                                    )
+                                ),
+                                structured_docs[0],
+                            )
+                            sheets = best_doc.get("structured_data") or []
+                            sheet = sheets[0] if sheets else None
+
+                            if not sheet or not sheet.get("rows"):
+                                answer = "Dataset ditemukan tapi tidak ada baris data untuk dianalisis."
+                                st.write(answer)
+                            else:
+                                df = pd.DataFrame(sheet["rows"])
+                                with st.spinner("AI menerjemahkan kriteria..."):
+                                    criteria = ai.extract_analysis_criteria(
+                                        question, list(df.columns)
+                                    )
+
+                                if criteria.get("missing_info"):
+                                    answer = (
+                                        f"Perlu klarifikasi: {criteria['missing_info']}"
+                                    )
+                                    st.write(answer)
+                                else:
+                                    result_df = df.copy()
+                                    for flt in criteria.get("filters", []):
+                                        col, op, val = (
+                                            flt["column"],
+                                            flt["operator"],
+                                            flt["value"],
+                                        )
+                                        if col not in result_df.columns:
+                                            continue
+                                        if op == ">=":
+                                            result_df = result_df[
+                                                pd.to_numeric(
+                                                    result_df[col], errors="coerce"
+                                                )
+                                                >= float(val)
+                                            ]
+                                        elif op == "<=":
+                                            result_df = result_df[
+                                                pd.to_numeric(
+                                                    result_df[col], errors="coerce"
+                                                )
+                                                <= float(val)
+                                            ]
+                                        elif op == "==":
+                                            result_df = result_df[
+                                                result_df[col].astype(str) == str(val)
+                                            ]
+                                        elif op == "contains":
+                                            result_df = result_df[
+                                                result_df[col]
+                                                .astype(str)
+                                                .str.contains(
+                                                    str(val), case=False, na=False
+                                                )
+                                            ]
+                                    sort_by = criteria.get("sort_by")
+                                    if sort_by and sort_by in result_df.columns:
+                                        result_df = result_df.sort_values(
+                                            sort_by,
+                                            ascending=not criteria.get(
+                                                "sort_desc", False
+                                            ),
+                                        )
+
+                                    answer = (
+                                        f"Berdasarkan data '{best_doc['title']}', ditemukan {len(result_df)} "
+                                        f"baris cocok dari {len(df)} baris. (Bantuan awal, bukan analisis "
+                                        f"profesional bersertifikat -- selalu verifikasi ulang.)"
+                                    )
+                                    st.write(answer)
+                                    st.dataframe(result_df, use_container_width=True)
+                                    xlsx_bytes = ai.create_xlsx_bytes(
+                                        best_doc["title"][:31],
+                                        result_df.to_dict("records"),
+                                    )
+                                    st.download_button(
+                                        "Download Hasil (.xlsx)",
+                                        xlsx_bytes,
+                                        file_name="Hasil Analisis.xlsx",
+                                        key=f"analysis_xlsx_{st.session_state.current_session_id}_{len(question)}",
+                                        icon=":material/download:",
+                                    )
+
+                    elif ai.is_file_request(question):
                         # Niat: minta file asli -- skip jawaban AI, langsung tombol download
                         if docs:
                             unique_docs = [
@@ -520,11 +716,11 @@ def file_type_icon(metadata: dict) -> str:
 
 @st.fragment
 def file_manager_page():
-    company_id = st.session_state.user["company_id"]
-    user_role = st.session_state.user["role"]
-    base_path = (
-        st.session_state.user["folder_access"] if user_role == "Karyawan" else "/"
-    )
+    user = st.session_state.user
+    company_id = user["company_id"]
+    user_role = user["role"]
+    base_path = "/" if user_role == "SuperAdmin" else user["folder_access"]
+    writable = can_write(user)
 
     if not st.session_state.fm_current_path.startswith(base_path):
         st.session_state.fm_current_path = base_path
@@ -542,7 +738,7 @@ def file_manager_page():
         for i, part in enumerate(parts):
             accum += part + "/"
             with crumb_cols[i + 1]:
-                disabled = (user_role == "Karyawan") and (
+                disabled = (user_role != "SuperAdmin") and (
                     not accum.startswith(base_path)
                 )
                 if st.button(part, key=f"c_{i}", disabled=disabled):
@@ -551,7 +747,7 @@ def file_manager_page():
 
     st.write("")
 
-    if user_role == "Admin":
+    if writable:
         col_a, col_b, col_c, _ = st.columns([2, 2, 2, 6])
         with col_a:
             with st.popover(
@@ -628,6 +824,7 @@ def file_manager_page():
                                 temp = f"temp_{f.name}"
                                 chunks = []
                                 tipe_file = "Dokumen"
+                                structured_data = None
 
                                 try:
                                     # ---------- CSV: 1 file = 1 chunk utuh ----------
@@ -649,6 +846,12 @@ def file_manager_page():
                                             f"Sheet: {name}\n{content}"
                                             for name, content in sheets
                                         ]
+                                        try:
+                                            structured_data = (
+                                                ai.extract_xlsx_structured(temp)
+                                            )
+                                        except Exception:
+                                            structured_data = None  # tetap lanjut, cuma tanpa fitur analisis
                                         tipe_file = "Spreadsheet"
 
                                     # ---------- Teks terstruktur: baca langsung ----------
@@ -834,6 +1037,7 @@ def file_manager_page():
                                         metadata={"tipe_file": tipe_file},
                                         file_bytes=bytes(f.getbuffer()),
                                         original_filename=f.name,
+                                        structured_data=structured_data,
                                     )
 
                                     success_count += 1
@@ -888,7 +1092,7 @@ def file_manager_page():
     selected_docs = st.session_state.fm_selected_docs
     total_selected = len(selected_folders) + len(selected_docs)
 
-    if user_role == "Admin" and total_selected > 0:
+    if writable and total_selected > 0:
         sel_cols = st.columns([3, 2, 7])
         with sel_cols[0]:
             st.markdown(
@@ -917,7 +1121,7 @@ def file_manager_page():
         with st.container(key="kos-row-folders"):
             for child in children:
                 name = child.rstrip("/").split("/")[-1]
-                if user_role == "Admin":
+                if writable:
                     row = st.columns([0.6, 8.4, 1], vertical_alignment="center")
                     with row[0]:
                         checked = st.checkbox(
@@ -945,7 +1149,7 @@ def file_manager_page():
                         st.session_state.fm_current_path = child
                         st.rerun(scope="fragment")
                 with opt_col:
-                    if user_role == "Admin":
+                    if writable:
                         with st.popover(
                             "", icon=":material/more_vert:", key=f"opt_folder_{child}"
                         ):
@@ -974,7 +1178,7 @@ def file_manager_page():
                 title_short = (
                     d["title"] if len(d["title"]) <= 46 else d["title"][:46] + "..."
                 )
-                if user_role == "Admin":
+                if writable:
                     row = st.columns([0.6, 5.4, 2, 2, 1], vertical_alignment="center")
                     with row[0]:
                         checked = st.checkbox(
@@ -1028,7 +1232,7 @@ def file_manager_page():
                             use_container_width=True,
                         )
                 with opt_col:
-                    if user_role == "Admin":
+                    if writable:
                         with st.popover(
                             "", icon=":material/more_vert:", key=f"opt_doc_{d['id']}"
                         ):
@@ -1096,7 +1300,7 @@ def folder_picker(company_id: str, key_prefix: str) -> str:
     current = st.session_state[state_key]
 
     parts = [p for p in current.strip("/").split("/") if p]
-    with st.container(key="kos-crumb"):
+    with st.container(key=f"kos-crumb-{key_prefix}"):
         cols = st.columns(len(parts) + 1, gap="small")
         with cols[0]:
             if st.button("Drive", key=f"{key_prefix}_root", icon=":material/home:"):
@@ -1113,7 +1317,7 @@ def folder_picker(company_id: str, key_prefix: str) -> str:
     children = db.list_child_folders(company_id, current)
 
     if children:
-        with st.container(key="kos-row-picker"):
+        with st.container(key=f"kos-row-picker-{key_prefix}"):
             for child in children:
                 name = child.rstrip("/").split("/")[-1]
                 if st.button(
@@ -1136,31 +1340,514 @@ def folder_picker(company_id: str, key_prefix: str) -> str:
 # MANAJEMEN TIM
 # ==========================================
 def admin_employee_management():
-    company_id = st.session_state.user["company_id"]
+    user = st.session_state.user
+    company_id = user["company_id"]
     st.markdown("### Manajemen tim")
 
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        emails_text = st.text_area("Daftar email karyawan (pisahkan baris)", height=150)
-    with col2:
-        st.caption("Telusuri folder tujuan akses")
-        final_folder = folder_picker(company_id, key_prefix="emp_picker")
-
-    if st.button("Daftarkan sekarang", type="primary", icon=":material/person_add:"):
-        email_list = re.findall(
-            r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", emails_text
+    if not can_write(user):
+        st.info(
+            "Akun Anda bertipe **read-only** -- tidak bisa menambah/mengubah tim. "
+            "Hubungi SuperAdmin kalau perlu perubahan."
         )
-        if email_list:
-            temp = db.add_users_bulk(email_list, final_folder, company_id)
-            st.success(f"{len(temp)} karyawan ditambahkan ke {final_folder}.")
-            st.dataframe(
-                pd.DataFrame(
-                    [{"Email": e, "Password sementara": p} for e, p in temp.items()]
-                ),
-                use_container_width=True,
+        return
+
+    tabs = ["Tambah Karyawan"]
+    if user["role"] == "SuperAdmin":
+        tabs.append("Tambah Admin")
+    tabs.append("Branding")
+    tab_objs = st.tabs(tabs)
+
+    with tab_objs[0]:
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            emails_text = st.text_area(
+                "Daftar email karyawan (pisahkan baris)", height=120, key="emp_emails"
             )
+            position_title = st.text_input(
+                "Jabatan (opsional, berlaku untuk semua email di atas)",
+                key="emp_position",
+                placeholder="mis. Barista, Staf Administrasi",
+            )
+        with col2:
+            st.caption("Telusuri folder tujuan akses")
+            final_folder = folder_picker(company_id, key_prefix="emp_picker")
+
+        if st.button(
+            "Daftarkan sekarang", type="primary", icon=":material/person_add:"
+        ):
+            email_list = re.findall(
+                r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", emails_text
+            )
+            if email_list:
+                temp = db.add_users_bulk(
+                    email_list, final_folder, company_id, position_title=position_title
+                )
+                st.success(f"{len(temp)} karyawan ditambahkan ke {final_folder}.")
+                st.dataframe(
+                    pd.DataFrame(
+                        [{"Email": e, "Password sementara": p} for e, p in temp.items()]
+                    ),
+                    use_container_width=True,
+                )
+            else:
+                st.warning("Tidak ada email valid ditemukan.")
+
+    if user["role"] == "SuperAdmin":
+        with tab_objs[1]:
+            st.caption(
+                "Admin baru akan mengelola folder yang dipilih di bawah dan turunannya."
+            )
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                admin_email = st.text_input("Email Admin baru", key="new_admin_email")
+                admin_position = st.text_input(
+                    "Jabatan (opsional)",
+                    key="new_admin_position",
+                    placeholder="mis. Manajer Keuangan",
+                )
+                admin_permission = st.radio(
+                    "Level akses",
+                    ["crud", "read_only"],
+                    format_func=lambda x: (
+                        "CRUD (bisa ubah/hapus)"
+                        if x == "crud"
+                        else "Read-only (lihat saja)"
+                    ),
+                    key="new_admin_permission",
+                )
+            with col2:
+                st.caption("Telusuri folder yang dikelola Admin ini")
+                admin_folder = folder_picker(company_id, key_prefix="admin_picker")
+
+            if st.button(
+                "Tambahkan Admin",
+                type="primary",
+                icon=":material/admin_panel_settings:",
+            ):
+                if admin_email.strip():
+                    temp_pw = db.add_admin(
+                        admin_email,
+                        admin_folder,
+                        admin_permission,
+                        company_id,
+                        position_title=admin_position,
+                    )
+                    st.success(
+                        f"Admin '{admin_email}' ditambahkan, mengelola folder {admin_folder}."
+                    )
+                    st.info(f"Password sementara: `{temp_pw}`")
+                else:
+                    st.warning("Email wajib diisi.")
+
+    with tab_objs[-1]:
+        st.caption(
+            "Logo & template dipakai otomatis saat AI membuatkan dokumen lewat Chat KOS "
+            "(ketik mis. 'buatkan SOP...' di chat)."
+        )
+        branding = db.get_company_branding(company_id)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.caption(
+                "Logo perusahaan"
+                + (
+                    " -- sudah ada"
+                    if branding.get("logo_url")
+                    else " -- belum diupload"
+                )
+            )
+            logo_file = st.file_uploader(
+                "Upload logo (PNG/JPG)", type=["png", "jpg", "jpeg"], key="logo_upload"
+            )
+            if logo_file and st.button("Simpan Logo", key="save_logo"):
+                db.upload_company_logo(
+                    company_id, bytes(logo_file.getbuffer()), logo_file.name
+                )
+                st.success("Logo tersimpan.")
+                st.rerun()
+        with col2:
+            st.caption(
+                "Template surat .docx"
+                + (
+                    " -- sudah ada"
+                    if branding.get("docx_template_url")
+                    else " -- belum diupload"
+                )
+            )
+            template_file = st.file_uploader(
+                "Upload template kosongan (.docx)", type=["docx"], key="template_upload"
+            )
+            if template_file and st.button("Simpan Template", key="save_template"):
+                db.upload_company_template(
+                    company_id, bytes(template_file.getbuffer()), template_file.name
+                )
+                st.success("Template tersimpan.")
+                st.rerun()
+
+
+# ==========================================
+# DIREKTORI KARYAWAN + DETAIL RIWAYAT
+# ==========================================
+def employee_directory_page():
+    user = st.session_state.user
+    company_id = user["company_id"]
+
+    if st.session_state.get("directory_selected_email"):
+        employee_detail_page(st.session_state.directory_selected_email)
+        return
+
+    st.markdown("### Direktori Karyawan")
+    st.caption(
+        "Menampilkan akun dalam cakupan folder Anda."
+        if user["role"] != "SuperAdmin"
+        else "Menampilkan seluruh akun di perusahaan."
+    )
+
+    users_list = db.list_managed_users(company_id, user["folder_access"], user["role"])
+
+    if not users_list:
+        st.caption("Belum ada karyawan/admin di cakupan Anda.")
+        return
+
+    with st.container(key="kos-row-directory"):
+        header = st.columns([3, 2, 2, 2, 2])
+        for col, label in zip(
+            header, ["Email", "Jabatan", "Posisi Web", "Kontrol", "Folder"]
+        ):
+            col.caption(label.upper())
+
+        for u in users_list:
+            row = st.columns([3, 2, 2, 2, 2])
+            with row[0]:
+                if st.button(
+                    u["email"], key=f"dir_{u['email']}", use_container_width=True
+                ):
+                    st.session_state.directory_selected_email = u["email"]
+                    st.session_state.directory_chat_selected = None
+                    st.rerun()
+            with row[1]:
+                st.write(u.get("position_title") or "-")
+            with row[2]:
+                # Dari POV Admin biasa, siapa pun di bawahnya cukup tampil "User"
+                pov_role = (
+                    u["role"]
+                    if user["role"] == "SuperAdmin"
+                    else ("Admin" if u["role"] in ("SuperAdmin", "Admin") else "User")
+                )
+                st.write(pov_role)
+            with row[3]:
+                if u["role"] in ("SuperAdmin", "Admin"):
+                    st.write(
+                        "CRUD"
+                        if u.get("permission_level", "crud") == "crud"
+                        else "Read-only"
+                    )
+                else:
+                    st.write("-")
+            with row[4]:
+                st.caption(u["folder_access"])
+
+
+def employee_detail_page(email: str):
+    if st.button("< Kembali ke Riwayat Tim", key="back_to_directory"):
+        st.session_state.directory_selected_email = None
+        st.session_state.directory_chat_selected = None
+        st.rerun()
+
+    st.markdown(f"### Riwayat: {email}")
+
+    tab1, tab2, tab3 = st.tabs(["Riwayat Chat", "Laporan Kerjaan", "Skor Kuis"])
+
+    with tab1:
+        sessions = db.list_chat_sessions(email)
+        if not sessions:
+            st.caption("Belum ada riwayat chat.")
         else:
-            st.warning("Tidak ada email valid ditemukan.")
+            col_list, col_view = st.columns([1, 2])
+            with col_list:
+                st.caption("Pilih percakapan")
+                with st.container(key="kos-row-directory-chat", height=400):
+                    for s in sessions:
+                        active = s["id"] == st.session_state.get(
+                            "directory_chat_selected"
+                        )
+                        label = ("• " if active else "") + (s["title"] or "Percakapan")
+                        if st.button(
+                            label, key=f"dirchat_{s['id']}", use_container_width=True
+                        ):
+                            st.session_state.directory_chat_selected = s["id"]
+                            st.rerun()
+            with col_view:
+                selected_session = st.session_state.get("directory_chat_selected")
+                if not selected_session:
+                    st.caption("Pilih percakapan di sebelah kiri untuk lihat isinya.")
+                else:
+                    with st.container(height=400):
+                        for m in db.get_chat_messages(selected_session):
+                            with st.chat_message(m["role"]):
+                                st.write(m["content"])
+                                for src in m.get("sources") or []:
+                                    render_source_link(src)
+
+    with tab2:
+        reports = db.get_user_reports(email)
+        if not reports:
+            st.caption("Belum ada laporan kerjaan.")
+        for r in reports:
+            with st.container(border=True):
+                st.caption((r.get("created_at") or "")[:16].replace("T", " "))
+                if r.get("content"):
+                    st.write(r["content"])
+                if r.get("media_url"):
+                    if r.get("media_type") == "video":
+                        st.video(r["media_url"])
+                    elif r.get("media_type") == "audio":
+                        st.audio(r["media_url"])
+
+    with tab3:
+        attempts = db.get_user_quiz_attempts(email)
+        if not attempts:
+            st.caption("Belum ada kuis yang dikerjakan.")
+        for a in attempts:
+            quiz_title = (a.get("quizzes") or {}).get("title", "Kuis")
+            status = "✅ Lulus" if a["passed"] else "❌ Belum lulus"
+            col1, col2, col3 = st.columns([3, 2, 2])
+            with col1:
+                st.write(f"**{quiz_title}**")
+            with col2:
+                st.write(f"{a['score']} ({status})")
+            with col3:
+                st.caption((a.get("created_at") or "")[:16].replace("T", " "))
+            st.divider()
+
+
+# ==========================================
+# LAPOR KERJAAN (KARYAWAN)
+# ==========================================
+def lapor_kerjaan_page():
+    user = st.session_state.user
+    st.markdown("### Lapor Kerjaan")
+    st.caption("Ceritakan pekerjaan hari ini -- lewat teks, atau rekam video/audio.")
+
+    report_text = st.text_area(
+        "Tulis laporan (opsional kalau upload media)", height=120
+    )
+    media_file = st.file_uploader(
+        "Atau upload video/audio (opsional)", type=["mp4", "mov", "mp3", "wav", "m4a"]
+    )
+
+    if st.button("Kirim Laporan", type="primary", icon=":material/send:"):
+        if not report_text.strip() and not media_file:
+            st.warning("Isi laporan teks atau upload media dulu.")
+            return
+
+        media_url = None
+        media_type = "text"
+        with st.spinner("Menyimpan laporan..."):
+            if media_file:
+                ext = media_file.name.split(".")[-1].lower()
+                media_type = "video" if ext in ["mp4", "mov"] else "audio"
+                temp = f"temp_report_{media_file.name}"
+                try:
+                    with open(temp, "wb") as f:
+                        f.write(media_file.getbuffer())
+                    media_url = db.upload_report_media(
+                        user["company_id"],
+                        user["email"],
+                        bytes(media_file.getbuffer()),
+                        media_file.name,
+                    )
+                except Exception as e:
+                    st.error(f"Gagal upload media: {e}")
+                finally:
+                    if os.path.exists(temp):
+                        os.remove(temp)
+
+            db.add_report(
+                user["email"],
+                user["company_id"],
+                content=report_text.strip() or None,
+                media_url=media_url,
+                media_type=media_type,
+            )
+        st.success("Laporan terkirim.")
+        st.rerun()
+
+    st.divider()
+    st.markdown("#### Laporan Saya Sebelumnya")
+    for r in db.get_user_reports(user["email"]):
+        with st.container(border=True):
+            st.caption((r.get("created_at") or "")[:16].replace("T", " "))
+            if r.get("content"):
+                st.write(r["content"])
+            if r.get("media_url"):
+                if r.get("media_type") == "video":
+                    st.video(r["media_url"])
+                elif r.get("media_type") == "audio":
+                    st.audio(r["media_url"])
+
+
+# ==========================================
+# KUIS TRAINING (KARYAWAN mengerjakan)
+# ==========================================
+def kuis_page():
+    user = st.session_state.user
+    st.markdown("### Kuis Training")
+
+    quizzes = db.list_quizzes_for_folder(user["company_id"], user["folder_access"])
+    if not quizzes:
+        st.caption("Belum ada kuis tersedia untuk folder Anda.")
+        return
+
+    my_attempts = db.get_user_quiz_attempts(user["email"])
+    best_status = {}  # quiz_id -> True kalau pernah lulus
+    for a in my_attempts:
+        qid = a["quiz_id"]
+        if a["passed"] or qid not in best_status:
+            best_status[qid] = a["passed"]
+
+    def label_with_status(qid):
+        title = next(q["title"] for q in quizzes if q["id"] == qid)
+        if qid not in best_status:
+            return f"{title} (Belum dikerjakan)"
+        return f"{title} ({'Sudah lulus' if best_status[qid] else 'Belum lulus'})"
+
+    quiz_ids = [q["id"] for q in quizzes]
+    selected_id = st.selectbox(
+        "Pilih kuis",
+        options=quiz_ids,
+        format_func=label_with_status,
+    )
+
+    quiz = db.get_quiz(selected_id)
+    if not quiz:
+        return
+
+    st.write(f"**{quiz['title']}** -- nilai minimal lulus: {quiz['passing_score']}")
+
+    answers = {}
+    with st.form(key=f"quiz_form_{selected_id}"):
+        for i, q in enumerate(quiz["questions"]):
+            answers[i] = st.radio(
+                q["question"],
+                options=list(range(4)),
+                format_func=lambda idx, opts=q["options"]: opts[idx],
+                key=f"quiz_{selected_id}_{i}",
+            )
+        submitted = st.form_submit_button("Kumpulkan Jawaban", type="primary")
+
+    if submitted:
+        total = len(quiz["questions"])
+        correct = sum(
+            1
+            for i, q in enumerate(quiz["questions"])
+            if answers.get(i) == q["correct_index"]
+        )
+        score = round((correct / total) * 100) if total else 0
+        passed = score >= quiz["passing_score"]
+
+        db.save_quiz_attempt(
+            selected_id,
+            user["email"],
+            user["company_id"],
+            score,
+            total,
+            passed,
+            answers,
+        )
+
+        if passed:
+            st.success(f"Lulus! Skor: {score} ({correct}/{total} benar)")
+        else:
+            st.error(
+                f"Belum lulus. Skor: {score} ({correct}/{total} benar) -- coba lagi."
+            )
+        st.caption(
+            "Refresh/pilih ulang kuis untuk lihat status terbaru di daftar riwayat."
+        )
+
+    st.divider()
+    st.markdown("#### Riwayat Skor Saya")
+    if not my_attempts:
+        st.caption("Belum pernah mengerjakan kuis apa pun.")
+    for a in my_attempts:
+        quiz_title = next(
+            (q["title"] for q in quizzes if q["id"] == a["quiz_id"]), "Kuis"
+        )
+        status = "✅ Lulus" if a["passed"] else "❌ Belum lulus"
+        col1, col2, col3 = st.columns([3, 2, 2])
+        with col1:
+            st.write(f"**{quiz_title}**")
+        with col2:
+            st.write(f"{a['score']} ({status})")
+        with col3:
+            st.caption((a.get("created_at") or "")[:16].replace("T", " "))
+        st.divider()
+
+
+# ==========================================
+# KELOLA KUIS (ADMIN/SUPERADMIN membuat kuis)
+# ==========================================
+def kelola_kuis_page():
+    user = st.session_state.user
+    company_id = user["company_id"]
+    st.markdown("### Kelola Kuis")
+
+    if not can_write(user):
+        st.info("Akun read-only tidak bisa membuat kuis.")
+        return
+
+    st.caption("Telusuri ke folder tempat dokumen sumber berada")
+    target_folder = folder_picker(company_id, key_prefix="quiz_picker")
+    docs, _ = db.list_documents_in_folder(
+        company_id, target_folder, page=1, page_size=100
+    )
+
+    if not docs:
+        st.caption("Tidak ada dokumen di folder ini.")
+        return
+
+    doc_titles = {d["id"]: d["title"] for d in docs}
+    selected_doc_id = st.selectbox(
+        "Pilih dokumen sumber",
+        options=list(doc_titles.keys()),
+        format_func=lambda did: doc_titles[did],
+    )
+    quiz_title = st.text_input("Judul kuis", value=doc_titles.get(selected_doc_id, ""))
+    num_questions = st.slider("Jumlah soal", 3, 10, 5)
+    passing_score = st.slider("Nilai minimal lulus", 50, 100, 70, step=5)
+
+    if st.button(
+        "Generate Kuis dari Dokumen", type="primary", icon=":material/auto_awesome:"
+    ):
+        selected_doc = next((d for d in docs if d["id"] == selected_doc_id), None)
+        content = (selected_doc or {}).get("content", "")
+        if not content.strip():
+            st.warning("Dokumen ini tidak punya cukup teks untuk dibuatkan soal.")
+            return
+        with st.spinner("AI sedang membuat soal..."):
+            try:
+                questions = ai.generate_quiz_questions(content, num_questions)
+            except Exception as e:
+                st.error(f"Gagal generate soal: {e}")
+                return
+        if not questions:
+            st.error("AI tidak menghasilkan soal yang valid, coba lagi.")
+            return
+        db.create_quiz(
+            company_id,
+            target_folder,
+            quiz_title.strip() or doc_titles[selected_doc_id],
+            questions,
+            source_document_id=selected_doc_id,
+            passing_score=passing_score,
+        )
+        st.success(f"Kuis '{quiz_title}' dengan {len(questions)} soal berhasil dibuat.")
+        with st.expander("Lihat soal yang dibuat"):
+            for i, q in enumerate(questions, 1):
+                st.write(f"**{i}. {q['question']}**")
+                for j, opt in enumerate(q["options"]):
+                    marker = "✓" if j == q["correct_index"] else "-"
+                    st.write(f"{marker} {opt}")
 
 
 # ==========================================
@@ -1178,16 +1865,25 @@ else:
         st.session_state.flash = None
 
     role = st.session_state.user["role"]
-    menus = (
-        ["Chat KOS", "File Manager", "Manajemen Tim"]
-        if role == "Admin"
-        else ["Chat KOS", "File Manager"]
-    )
-    icons = (
-        ["chat-square-text", "folder2", "people"]
-        if role == "Admin"
-        else ["chat-square-text", "folder2"]
-    )
+
+    if role in ("SuperAdmin", "Admin"):
+        menus = [
+            "Chat KOS",
+            "File Manager",
+            "Manajemen Tim",
+            "Riwayat Tim",
+            "Kelola Kuis",
+        ]
+        icons = [
+            "chat-square-text",
+            "folder2",
+            "people",
+            "clock-history",
+            "clipboard-check",
+        ]
+    else:
+        menus = ["Chat KOS", "File Manager", "Lapor Kerjaan", "Kuis"]
+        icons = ["chat-square-text", "folder2", "camera-video", "patch-question"]
 
     selected = sidebar_nav(menus, icons, st.session_state.current_menu)
     st.session_state.current_menu = selected
@@ -1196,5 +1892,13 @@ else:
         chat_page()
     elif selected == "File Manager":
         file_manager_page()
-    elif role == "Admin":
+    elif selected == "Manajemen Tim":
         admin_employee_management()
+    elif selected == "Riwayat Tim":
+        employee_directory_page()
+    elif selected == "Kelola Kuis":
+        kelola_kuis_page()
+    elif selected == "Lapor Kerjaan":
+        lapor_kerjaan_page()
+    elif selected == "Kuis":
+        kuis_page()

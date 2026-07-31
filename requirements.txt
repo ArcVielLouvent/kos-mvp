@@ -11,3 +11,5 @@ striprtf
 pdfplumber
 pytesseract
 pdf2image
+reportlab
+requests

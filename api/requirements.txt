@@ -1,0 +1,15 @@
+streamlit
+streamlit-option-menu
+supabase
+google-genai
+bcrypt
+pandas
+python-docx
+python-pptx
+openpyxl
+striprtf
+pdfplumber
+pytesseract
+pdf2image
+fastapi
+uvicorn

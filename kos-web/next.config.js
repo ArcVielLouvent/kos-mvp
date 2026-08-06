@@ -5,7 +5,7 @@ const nextConfig = {
       {
         // Pengguna memanggil '/api/...', Next.js meneruskannya ke folder Python secara internal
         source: '/api/:path*',
-        destination: '/python-api/index.py',
+        destination: 'api/index.py',
       },
     ];
   },

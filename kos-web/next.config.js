@@ -3,9 +3,9 @@ const nextConfig = {
   async rewrites() {
     return [
       {
-        // Semua panggil ke /api/ akan diteruskan ke server Python Anda yang aktif
+        // Meneruskan permintaan /api ke fungsi Python di dalam folder yang sama
         source: '/api/:path*',
-        destination: 'https://vercel.app*', // Ganti dengan URL dari Langkah 1
+        destination: '/api/index.py',
       },
     ];
   },

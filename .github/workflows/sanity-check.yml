@@ -16,13 +16,13 @@ jobs:
       - name: Install Dependencies
         run: pip install -r requirements.txt
 
-      - name: AST Syntax Check
+            - name: AST Syntax Check
         run: |
           python -c "
           import ast
-          # Memeriksa sintaks kode pada folder api dan file root utama
-          ast.parse(open('api/index.py').read())
-          ast.parse(open('api/app.py').read())
-          ast.parse(open('api/db.py').read())
-          ast.parse(open('api/ai.py').read())
+          ast.parse(open('kos-web/api/index.py').read())
+          ast.parse(open('kos-web/api/app.py').read())
+          ast.parse(open('kos-web/api/db.py').read())
+          ast.parse(open('kos-web/api/ai.py').read())
           "
+

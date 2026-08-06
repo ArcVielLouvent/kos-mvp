@@ -6,7 +6,7 @@ import { Sidebar } from "@/components/Sidebar";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
     const router = useRouter();
-    const [user, setUser] = useState<{ role: string; email: string; company_id: string } | None>(null);
+    const [user, setUser] = useState<{ role: string; email: string; company_id: string } | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {

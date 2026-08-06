@@ -7,8 +7,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
-      - run: python -c "import ast; ast.parse(open('app.py').read()); ast.parse(open('db.py').read()); ast.parse(open('ai.py').read())"
+          cache: "pip" # Mengaktifkan caching otomatis untuk mempercepat build selanjutnya
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: AST Syntax Check
+        run: |
+          python -c "
+          import ast
+          # Memeriksa sintaks kode pada folder api dan file root utama
+          ast.parse(open('api/index.py').read())
+          ast.parse(open('api/app.py').read())
+          ast.parse(open('api/db.py').read())
+          ast.parse(open('api/ai.py').read())
+          "

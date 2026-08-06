@@ -3,9 +3,9 @@ const nextConfig = {
   async rewrites() {
     return [
       {
-        // Meneruskan permintaan /api ke fungsi Python di dalam folder yang sama
+        // Pengguna memanggil '/api/...', Next.js meneruskannya ke folder Python secara internal
         source: '/api/:path*',
-        destination: '/api/index.py',
+        destination: '/python-api/index.py',
       },
     ];
   },

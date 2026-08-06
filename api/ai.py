@@ -1,8 +1,9 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import time
+from functools import lru_cache
 from google import genai
 from google.genai import types
-import streamlit as st
 
 
 def is_file_request(question: str) -> bool:
@@ -114,9 +115,6 @@ def is_analysis_request(question: str) -> bool:
     return any(kw in q for kw in keywords)
 
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-
 def embed_chunks_parallel(chunks: list, max_workers: int = 4) -> list:
     """
     Embed banyak chunk SEKALIGUS secara paralel (bukan satu-satu berurutan).
@@ -137,7 +135,11 @@ def embed_chunks_parallel(chunks: list, max_workers: int = 4) -> list:
 
 def get_client() -> genai.Client:
     """Inisialisasi Client menggunakan SDK google-genai yang mutakhir"""
-    return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "Environment variable GEMINI_API_KEY belum di-set di Vercel!")
+    return genai.Client(api_key=api_key)
 
 
 def _call_with_retry(func, *args, max_retries: int = 4, base_delay: int = 3, **kwargs):
@@ -213,13 +215,13 @@ def _generate_with_fallback(contents):
     raise last_error
 
 
-@st.cache_resource
+@lru_cache(maxsize=1)
 def get_embedding_model() -> str:
     """Otomatis beralih ke lini Gemini Embedding terbaru"""
     return "gemini-embedding-2"
 
 
-@st.cache_resource
+@lru_cache(maxsize=1)
 def get_generation_model() -> str:
     """Menggunakan lini Gemini Flash paling mutakhir dan stabil"""
     return "gemini-3.5-flash"
@@ -313,7 +315,8 @@ def extract_multimodal(file_path: str, mime_type: str, display_name: str) -> str
                 client.files.delete(name=uploaded_file.name)
             except Exception:
                 pass
-            raise ValueError(f"Google Gemini gagal memproses file '{display_name}'.")
+            raise ValueError(
+                f"Google Gemini gagal memproses file '{display_name}'.")
 
         if "pdf" in mime_type:
             prompt = (
@@ -413,7 +416,8 @@ def extract_xlsx_text(file_path: str) -> list:
         rows = []
         for row in sheet.iter_rows(values_only=True):
             if any(cell is not None for cell in row):
-                rows.append(" | ".join(str(c) if c is not None else "" for c in row))
+                rows.append(" | ".join(
+                    str(c) if c is not None else "" for c in row))
         if rows:
             sheets.append((sheet.title, "\n".join(rows)))
 
@@ -442,7 +446,8 @@ def extract_xlsx_structured(file_path: str) -> list:
         for row in all_rows[1:]:
             if any(cell is not None for cell in row):
                 rows.append(
-                    {header[i]: row[i] for i in range(min(len(header), len(row)))}
+                    {header[i]: row[i]
+                        for i in range(min(len(header), len(row)))}
                 )
         if rows:
             result.append({"sheet": sheet.title, "rows": rows})
@@ -453,7 +458,8 @@ def extract_xlsx_structured(file_path: str) -> list:
 def format_dataframe_as_text(df, sheet_name: str = "Data") -> str:
     """Ubah pandas DataFrame (mis. dari CSV) jadi teks tabel utuh, tanpa dipotong per baris."""
     header = " | ".join(str(c) for c in df.columns)
-    rows = [" | ".join(str(v) for v in row) for row in df.itertuples(index=False)]
+    rows = [" | ".join(str(v) for v in row)
+            for row in df.itertuples(index=False)]
     return f"Sheet: {sheet_name}\n" + header + "\n" + "\n".join(rows)
 
 
@@ -601,7 +607,8 @@ def generate_draft_document(
     Buat draf dokumen berdasarkan pengetahuan umum AI, disesuaikan jenis dokumen
     dan konteks perusahaan kalau ada. SELALU dilabeli sebagai draf.
     """
-    instruction = DOC_TYPE_INSTRUCTIONS.get(doc_type, DOC_TYPE_INSTRUCTIONS["Lainnya"])
+    instruction = DOC_TYPE_INSTRUCTIONS.get(
+        doc_type, DOC_TYPE_INSTRUCTIONS["Lainnya"])
     prompt = f"""Kamu diminta membuat DRAF dokumen kerja untuk sebuah perusahaan.
 
 Jenis dokumen: {doc_type}
@@ -700,7 +707,8 @@ def create_pdf_bytes(title: str, content: str, logo_bytes: bytes = None) -> byte
     story = []
     if logo_bytes:
         try:
-            story.append(Image(io.BytesIO(logo_bytes), width=3 * cm, height=3 * cm))
+            story.append(Image(io.BytesIO(logo_bytes),
+                         width=3 * cm, height=3 * cm))
             story.append(Spacer(1, 12))
         except Exception:
             pass
@@ -731,7 +739,8 @@ def create_xlsx_bytes(title: str, rows: list) -> bytes:
 
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = title[:31] if title else "Data"  # Excel batasi nama sheet 31 karakter
+    # Excel batasi nama sheet 31 karakter
+    ws.title = title[:31] if title else "Data"
 
     if rows:
         headers = list(rows[0].keys())

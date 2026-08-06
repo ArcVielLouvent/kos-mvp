@@ -1,6 +1,6 @@
+import os
 import secrets
 import bcrypt
-import streamlit as st
 from supabase import create_client, Client
 
 
@@ -9,8 +9,11 @@ def get_client() -> Client:
     Inisialisasi Client Supabase Admin (Bypass RLS)
     Menggunakan SUPABASE_SERVICE_ROLE_KEY agar aman dari error RLS 42501.
     """
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not url or not key:
+        raise ValueError(
+            "Environment variable SUPABASE_URL atau SUPABASE_SERVICE_ROLE_KEY belum di-set di Vercel!")
     return create_client(url, key)
 
 
@@ -81,7 +84,8 @@ def get_user(email: str):
 def update_password(email: str, new_password: str):
     client = get_client()
     client.table("users").update(
-        {"password": hash_password(new_password), "must_change_password": False}
+        {"password": hash_password(new_password),
+         "must_change_password": False}
     ).eq("email", email.strip().lower()).execute()
 
 
@@ -207,8 +211,8 @@ def insert_document_with_chunks(
             # Sengaja TIDAK ditelan diam-diam -- tampilkan biar bisa didiagnosis.
             # Dokumen tetap tersimpan (bisa dicari & dijawab AI), cuma tanpa file
             # asli untuk didownload.
-            st.warning(
-                f"'{title}': gagal upload ke Storage, dokumen tetap tersimpan "
+            print(
+                f"Peringatan: '{title}' gagal upload ke Storage, dokumen tetap tersimpan "
                 f"tapi TANPA file asli untuk didownload. Penyebab: {e}"
             )
             file_url = None
@@ -306,7 +310,8 @@ def list_child_folders(company_id: str, parent_path: str) -> list:
     parent_path = normalize_folder(parent_path)
     client = get_client()
     folders = (
-        client.table("folders").select("path").eq("company_id", company_id).execute()
+        client.table("folders").select("path").eq(
+            "company_id", company_id).execute()
     )
     docs = (
         client.table("documents")
@@ -321,7 +326,7 @@ def list_child_folders(company_id: str, parent_path: str) -> list:
     children = set()
     for path in all_paths:
         if path.startswith(parent_path) and path != parent_path:
-            first_segment = path[len(parent_path) :].split("/")[0]
+            first_segment = path[len(parent_path):].split("/")[0]
             if first_segment:
                 children.add(parent_path + first_segment + "/")
     return sorted(children)
@@ -675,7 +680,8 @@ def upload_company_logo(company_id: str, file_bytes: bytes, filename: str) -> st
         storage_path, 3600 * 24 * 365
     )
     url = signed.get("signedURL") or signed.get("signed_url")
-    client.table("companies").update({"logo_url": url}).eq("id", company_id).execute()
+    client.table("companies").update(
+        {"logo_url": url}).eq("id", company_id).execute()
     return url
 
 

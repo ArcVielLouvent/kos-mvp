@@ -2,8 +2,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import db
 import ai
+import auth  # Mengimpor file auth.py Anda
 
 app = FastAPI()
+
+# Daftarkan router dari auth.py agar rute /api/auth/... bisa diakses oleh Vercel
+app.include_router(auth.router)
 
 
 class ChatRequest(BaseModel):
@@ -133,3 +137,5 @@ async def dashboard_endpoint():
         }
     except Exception as e:
         return {"stats": [{"label": "Total Dokumen", "value": 0}, {"label": "Total Karyawan", "value": 0}], "recent": []}
+
+app = app

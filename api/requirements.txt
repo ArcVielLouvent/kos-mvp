@@ -1,5 +1,3 @@
-streamlit
-streamlit-option-menu
 supabase
 google-genai
 bcrypt
@@ -11,5 +9,7 @@ striprtf
 pdfplumber
 pytesseract
 pdf2image
+reportlab
+requests
 fastapi
 uvicorn

@@ -33,14 +33,21 @@ export default function FileManagerPage() {
   const loadFiles = async () => {
     setIsLoading(true);
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("sb-access-token") || localStorage.getItem("supabase_token") : null;
+      // 1. Ambil data kos_user dari Local Storage yang terbukti ada di browsermu
+      const storedUser = typeof window !== "undefined" ? localStorage.getItem("kos_user") : null;
+      let userEmail = "";
 
-      // PASTIKAN BARIS INI SUDAH MEMAKAI ` DAN ${API_URL} DI DEPANNYA
-      const res = await fetch(`${API_URL}/api/files?path=${currentPath}&page=${page}&page_size=${PAGE_SIZE}`, {
+      if (storedUser) {
+        const parsed = JSON.parse(storedUser);
+        userEmail = parsed.email || ""; // Otomatis mendapatkan "admin@kopinusantara.com" secara dinamis
+      }
+
+      // 2. Kirim email tersebut sebagai query parameter 'user_id' secara aman ke Python
+      const res = await fetch(`${API_URL}/api/files?path=${currentPath}&page=${page}&page_size=${PAGE_SIZE}&user_id=${encodeURIComponent(userEmail)}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Cache-Control": "no-cache"
         }
       });
 

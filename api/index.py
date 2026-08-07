@@ -402,42 +402,47 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
 
 
 # ====================================================================
-# FILE MANAGER (VERSI REPLIKASI STREAMLIT REPAIR - FINAL TAHAN BANTING)
+# FILE MANAGER (VERSI DINAMIS USER EMAIL - FIX TOTAL 401)
 # ====================================================================
 @app.get("/api/files")
 async def files_endpoint(
     path: str = "/",
     page: int = 1,
     page_size: int = PAGE_SIZE_DEFAULT,
-    user: dict = Depends(get_current_user_context),
+    user_id: str = None  # Menangkap parameter user_id dinamis dari Next.js
 ):
+    if not user_id:
+        raise HTTPException(
+            status_code=400, detail="Parameter user_id wajib disertakan.")
+
+    # Ambil konteks user menggunakan fungsi db.get_user bawaan Anda lewat email yang dikirim frontend
+    user = db.get_user(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=404, detail="Profil pengguna tidak ditemukan di database.")
+
     company_id = user["company_id"]
     base_path = base_path_for(user)
 
+    # Menghindari bug double slash (//)
+    if path != "/":
+        if not path.startswith("/"):
+            path = "/" + path
+        if not path.endswith("/"):
+            path = path + "/"
+
+    if not path.startswith(base_path):
+        path = base_path
+
     try:
-        # 1. KUNCI UTAMA: Terjemahkan karakter %20 internet menjadi spasi asli
-        path = urllib.parse.unquote(path)
-
-        # 2. Menghindari bug double slash (//). Jika path adalah "/", biarkan tetap murni "/"
-        if path != "/":
-            if not path.startswith("/"):
-                path = "/" + path
-            if not path.endswith("/"):
-                path = path + "/"
-
-        if not path.startswith(base_path):
-            path = base_path
-
-        # 3. Panggil fungsi database persis seperti alur Streamlit lama Anda
+        # Ambil data folder & file asli dari Supabase
         folders_raw = db.list_child_folders(company_id, path)
         docs, total = db.list_documents_in_folder(
             company_id, path, page=page, page_size=page_size)
 
-        # 4. Format data folder untuk kebutuhan rendering visual komponen Next.js
         folders_formatted = []
         if folders_raw:
             for f in folders_raw:
-                # Memastikan format sub-path anak selalu aman diakhiri satu '/'
                 cleaned_path = f if f.endswith("/") else f"{f}/"
                 if not cleaned_path.startswith("/"):
                     cleaned_path = "/" + cleaned_path
@@ -461,6 +466,7 @@ async def files_endpoint(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/debug-user")
 async def debug_user_endpoint(user: dict = Depends(get_current_user_context)):

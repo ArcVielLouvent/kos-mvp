@@ -26,6 +26,7 @@ export default function DashboardPage() {
             })
             .catch((err) => {
                 console.error("Dashboard Fetch Error:", err);
+                setStats([{ label: `Gagal memuat: ${err.message || "error tidak diketahui"}`, value: "-" }]);
                 setIsLoading(false);
             });
     }, []);

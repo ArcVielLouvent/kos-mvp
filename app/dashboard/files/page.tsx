@@ -33,8 +33,9 @@ export default function FileManagerPage() {
     try {
       const result = await apiJson(`/api/files?path=${encodeURIComponent(currentPath)}&page=${page}&page_size=${PAGE_SIZE}`);
       setData(result);
-    } catch {
-      // biarkan tampilan lama kalau gagal fetch
+      setActionMsg("");
+    } catch (e: any) {
+      setActionMsg(`Gagal memuat file: ${e.message || "tidak diketahui"}`);
     } finally {
       setIsLoading(false);
     }

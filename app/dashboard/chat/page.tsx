@@ -39,13 +39,49 @@ interface ChatSession {
     title: string | null;
 }
 
+/** Ubah URL YouTube apa pun (watch?v=, youtu.be/, embed/) jadi ID video
+ * saja, supaya bisa dipasang ke src iframe embed. Balikin null kalau
+ * polanya tidak dikenali (tetap fallback ke tombol "buka link" di bawah). */
+function extractYoutubeId(url: string): string | null {
+    try {
+        const u = new URL(url);
+        if (u.hostname.includes("youtu.be")) return u.pathname.slice(1) || null;
+        if (u.hostname.includes("youtube.com")) {
+            if (u.pathname === "/watch") return u.searchParams.get("v");
+            if (u.pathname.startsWith("/embed/")) return u.pathname.split("/embed/")[1] || null;
+            if (u.pathname.startsWith("/shorts/")) return u.pathname.split("/shorts/")[1] || null;
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 function SourceLink({ src }: { src: Source }) {
     const isYoutube = src.metadata?.tipe_file === "Video YouTube";
     if (isYoutube && src.file_url) {
+        const videoId = extractYoutubeId(src.file_url);
         return (
             <div className="mt-2">
                 <p className="mb-1 text-xs font-medium text-ink-muted">{src.title}</p>
-                <video src={src.file_url} controls className="max-w-xs rounded-[var(--radius-control)]" />
+                {videoId ? (
+                    <iframe
+                        src={`https://www.youtube.com/embed/${videoId}`}
+                        title={src.title}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        className="aspect-video w-full max-w-xs rounded-[var(--radius-control)] border border-navy-100"
+                    />
+                ) : (
+                    <a
+                        href={src.file_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-2 rounded-[var(--radius-control)] border border-navy-100 bg-navy-50 px-2.5 py-2 text-xs font-medium text-navy-900 hover:bg-navy-100"
+                    >
+                        Buka video: {src.title}
+                    </a>
+                )}
             </div>
         );
     }
@@ -326,4 +362,4 @@ export default function ChatPage() {
             </div>
         </div>
     );
-}
+} 

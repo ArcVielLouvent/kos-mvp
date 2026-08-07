@@ -462,6 +462,16 @@ async def files_endpoint(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/debug-user")
+async def debug_user_endpoint(user: dict = Depends(get_current_user_context)):
+    """Endpoint sementara untuk melihat profil user asli yang dibaca oleh Vercel dari token JWT"""
+    return {
+        "email_terbaca": user.get("email"),
+        "role_terbaca": user.get("role"),
+        "company_id_terbaca": user.get("company_id"),
+        "folder_access_terbaca": user.get("folder_access")
+    }
+
 
 @app.get("/api/folders/children")
 async def folder_children_endpoint(

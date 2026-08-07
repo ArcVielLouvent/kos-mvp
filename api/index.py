@@ -5,6 +5,7 @@ import re
 import time
 import uuid
 from typing import List, Optional
+import urllib.parse
 
 import pandas as pd
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -401,7 +402,7 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
 
 
 # ====================================================================
-# FILE MANAGER (VERSI AKURASI TINGGI - ANTI DATA KOSONG)
+# FILE MANAGER (VERSI REPLIKASI STREAMLIT REPAIR - FINAL TAHAN BANTING)
 # ====================================================================
 @app.get("/api/files")
 async def files_endpoint(
@@ -412,45 +413,38 @@ async def files_endpoint(
 ):
     company_id = user["company_id"]
     base_path = base_path_for(user)
-    
-    # 1. Normalisasi string path input dari Next.js
-    if not path.startswith("/"):
-        path = "/" + path
-    if not path.endswith("/"):
-        path = path + "/"
-
-    if not path.startswith(base_path):
-        path = base_path
 
     try:
-        # 2. Ambil folder mentah dari db.py Anda
-        folders_raw = db.list_child_folders(company_id, path)
-        
-        # --- PENANGANAN KHUSUS ROOT DRIVE COBA JALUR CADANGAN JIKA KOSONG ---
-        if (not folders_raw or len(folders_raw) == 0) and path == "/":
-            # Jika kueri root strict gagal, ambil semua folder unik milik perusahaan ini (dari db.py)
-            all_folders = db.get_unique_folders(company_id)
-            if all_folders:
-                # Filter folder yang berada di tingkat paling atas (tidak memiliki sub-folder induk)
-                # Contoh: Mengambil '/Tutorial/' dan membuang '/Penilaian Karyawan/KPI/'
-                folders_raw = [
-                    f for f in all_folders 
-                    if len([p for p in f.strip("/").split("/") if p]) == 1
-                ]
-        # ----------------==================================-----------------
+        # 1. KUNCI UTAMA: Terjemahkan karakter %20 internet menjadi spasi asli
+        path = urllib.parse.unquote(path)
 
-        docs, total = db.list_documents_in_folder(company_id, path, page=page, page_size=page_size)
-        
-        # 3. Format data folder untuk kebutuhan rendering visual komponen Next.js
+        # 2. Menghindari bug double slash (//). Jika path adalah "/", biarkan tetap murni "/"
+        if path != "/":
+            if not path.startswith("/"):
+                path = "/" + path
+            if not path.endswith("/"):
+                path = path + "/"
+
+        if not path.startswith(base_path):
+            path = base_path
+
+        # 3. Panggil fungsi database persis seperti alur Streamlit lama Anda
+        folders_raw = db.list_child_folders(company_id, path)
+        docs, total = db.list_documents_in_folder(
+            company_id, path, page=page, page_size=page_size)
+
+        # 4. Format data folder untuk kebutuhan rendering visual komponen Next.js
         folders_formatted = []
         if folders_raw:
             for f in folders_raw:
+                # Memastikan format sub-path anak selalu aman diakhiri satu '/'
                 cleaned_path = f if f.endswith("/") else f"{f}/"
                 if not cleaned_path.startswith("/"):
                     cleaned_path = "/" + cleaned_path
-                    
-                name = [p for p in cleaned_path.split("/") if p][-1] if [p for p in cleaned_path.split("/") if p] else cleaned_path
-                
+
+                name = [p for p in cleaned_path.split(
+                    "/") if p][-1] if [p for p in cleaned_path.split("/") if p] else cleaned_path
+
                 folders_formatted.append({
                     "path": cleaned_path,
                     "name": name
@@ -467,7 +461,6 @@ async def files_endpoint(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 @app.get("/api/folders/children")

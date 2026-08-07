@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException  # Tambahkan APIRouter di sini
 from pydantic import BaseModel
-import db
+from . import db
 
 # Ganti 'app = FastAPI()' dengan baris di bawah ini
 router = APIRouter()

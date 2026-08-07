@@ -1,8 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import db
-import ai
-import auth  # Mengimpor file auth.py Anda
+from . import db
+from . import ai
+from . import auth
 
 app = FastAPI()
 

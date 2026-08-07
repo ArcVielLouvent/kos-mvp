@@ -6,7 +6,9 @@ import { DocumentBadge } from "@/components/DocumentBadge";
 import { apiFetch, apiJson } from "@/lib/api";
 
 const PAGE_SIZE = 20;
-
+const API_URL = typeof window !== "undefined" && window.location.hostname === "localhost"
+  ? "http://localhost:8000"
+  : "";
 export default function FileManagerPage() {
   const [currentPath, setCurrentPath] = useState("/");
   const [data, setData] = useState<{ folders: any[]; files: any[]; total: number; writable: boolean }>({
@@ -28,23 +30,22 @@ export default function FileManagerPage() {
   const [selectedFolders, setSelectedFolders] = useState<Set<string>>(new Set());
   const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set());
 
-    const loadFiles = async () => {
+  const loadFiles = async () => {
     setIsLoading(true);
     try {
-      // Ambil token JWT session dari local storage agar otentikasi Bearer tetap sah di internet
       const token = typeof window !== "undefined" ? localStorage.getItem("sb-access-token") || localStorage.getItem("supabase_token") : null;
-      
-      // Gunakan fetch bawaan browser secara langsung untuk menjamin parameter 'path=/' terkirim murni tanpa dimanipulasi oleh lib/api
-      const res = await fetch(`/api/files?path=${currentPath}&page=${page}&page_size=${PAGE_SIZE}`, {
+
+      // PASTIKAN BARIS INI SUDAH MEMAKAI ` DAN ${API_URL} DI DEPANNYA
+      const res = await fetch(`${API_URL}/api/files?path=${currentPath}&page=${page}&page_size=${PAGE_SIZE}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         }
       });
-      
+
       if (!res.ok) throw new Error("Gagal mengambil data dari server cloud.");
-      
+
       const result = await res.json();
       setData(result);
       setActionMsg("");
@@ -54,6 +55,7 @@ export default function FileManagerPage() {
       setIsLoading(false);
     }
   };
+
 
   useEffect(() => {
     loadFiles();

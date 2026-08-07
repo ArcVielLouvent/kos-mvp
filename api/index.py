@@ -423,17 +423,8 @@ async def files_endpoint(
     path: str = "/",
     page: int = 1,
     page_size: int = PAGE_SIZE_DEFAULT,
-    user_id: str = None
+    user: dict = Depends(get_current_user_context),
 ):
-    if not user_id:
-        raise HTTPException(
-            status_code=400, detail="Parameter user_id wajib disertakan.")
-
-    user = db.get_user(user_id)
-    if not user:
-        raise HTTPException(
-            status_code=404, detail="Profil pengguna tidak ditemukan di database.")
-
     company_id = user["company_id"]
     base_path = base_path_for(user)
 
@@ -859,16 +850,25 @@ async def list_users_endpoint(user: dict = Depends(get_current_user_context)):
         user["company_id"], user["folder_access"], user["role"])
     return {"users": users_list}
 
+def require_team_view(viewer: dict, target_email: str):
+    if not is_admin_tier(viewer):
+        raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
+    if viewer["role"] != "SuperAdmin":
+        target = db.get_user(target_email)
+        if not target or not target.get("folder_access", "").startswith(viewer["folder_access"]):
+            raise HTTPException(status_code=403, detail="Di luar cakupan folder Anda.")
 
 @app.get("/api/team/users/{email}/chat-sessions")
 async def user_chat_sessions_endpoint(
     email: str, user: dict = Depends(get_current_user_context)
 ):
+    require_team_view(user, email) 
     return {"sessions": db.list_chat_sessions(email)}
 
 
 @app.get("/api/team/users/{email}/reports")
 async def user_reports_endpoint(email: str, user: dict = Depends(get_current_user_context)):
+    require_team_view(user, email
     return {"reports": db.get_user_reports(email)}
 
 
@@ -876,6 +876,7 @@ async def user_reports_endpoint(email: str, user: dict = Depends(get_current_use
 async def user_quiz_attempts_endpoint(
     email: str, user: dict = Depends(get_current_user_context)
 ):
+    require_team_view(user, email
     return {"attempts": db.get_user_quiz_attempts(email)}
 
 
@@ -1002,6 +1003,8 @@ async def generate_quiz_endpoint(
 # ====================================================================
 @app.get("/api/dashboard")
 async def dashboard_endpoint(user: dict = Depends(get_current_user_context)):
+    if not is_admin_tier(user):             # <-- tambahkan baris ini
+        raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
     try:
         company_id = user["company_id"]
         _, doc_count = db.list_documents_in_folder(

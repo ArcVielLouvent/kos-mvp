@@ -31,8 +31,21 @@ export default function FileManagerPage() {
     const loadFiles = async () => {
     setIsLoading(true);
     try {
-      // HAPUS encodeURIComponent, kirim currentPath langsung secara bersih
-      const result = await apiJson(`/api/files?path=${currentPath}&page=${page}&page_size=${PAGE_SIZE}`);
+      // Ambil token JWT session dari local storage agar otentikasi Bearer tetap sah di internet
+      const token = typeof window !== "undefined" ? localStorage.getItem("sb-access-token") || localStorage.getItem("supabase_token") : null;
+      
+      // Gunakan fetch bawaan browser secara langsung untuk menjamin parameter 'path=/' terkirim murni tanpa dimanipulasi oleh lib/api
+      const res = await fetch(`/api/files?path=${currentPath}&page=${page}&page_size=${PAGE_SIZE}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      
+      if (!res.ok) throw new Error("Gagal mengambil data dari server cloud.");
+      
+      const result = await res.json();
       setData(result);
       setActionMsg("");
     } catch (e: any) {
@@ -41,7 +54,6 @@ export default function FileManagerPage() {
       setIsLoading(false);
     }
   };
-
 
   useEffect(() => {
     loadFiles();

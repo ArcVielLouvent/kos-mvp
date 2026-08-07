@@ -288,8 +288,35 @@ export default function FileManagerPage() {
               {data.folders?.map((f: any) => (
                 <div
                   key={f.path}
-                  // KUNCI PERBAIKAN 1: Klik area kotak putih manapun otomatis akan langsung masuk ke dalam folder!
-                  onClick={() => setCurrentPath(f.path)}
+                  // PERBAIKAN TOTAL: Saat kotak diklik, ubah state DAN langsung paksa fetch data path baru saat itu juga!
+                  onClick={async () => {
+                    setCurrentPath(f.path);
+                    setIsLoading(true);
+                    try {
+                      const storedUser = typeof window !== "undefined" ? localStorage.getItem("kos_user") : null;
+                      let userEmail = "";
+                      if (storedUser) {
+                        const parsed = JSON.parse(storedUser);
+                        userEmail = parsed.email || "";
+                      }
+                      // Panggil langsung ke server Vercel menggunakan path folder yang baru saja diklik
+                      const res = await fetch(`${API_URL}/api/files?path=${encodeURIComponent(f.path)}&page=1&page_size=${PAGE_SIZE}&user_id=${encodeURIComponent(userEmail)}`, {
+                        method: "GET",
+                        headers: {
+                          "Content-Type": "application/json",
+                          "Cache-Control": "no-cache"
+                        }
+                      });
+                      if (res.ok) {
+                        const result = await res.json();
+                        setData(result);
+                      }
+                    } catch (e) {
+                      console.error("Gagal menavigasi folder:", e);
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  }}
                   className="group flex items-center justify-between rounded-[var(--radius-card)] border border-navy-100 bg-white p-3 hover:bg-navy-50 shadow-sm transition-all cursor-pointer"
                 >
                   <div className="flex items-center gap-2 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
@@ -297,7 +324,6 @@ export default function FileManagerPage() {
                       <input
                         type="checkbox"
                         checked={selectedFolders.has(f.path)}
-                        // KUNCI PERBAIKAN 2: Menggunakan e.stopPropagation() agar centang checkbox tidak memicu masuk folder
                         onChange={(e) => {
                           e.stopPropagation();
                           toggleFolder(f.path);
@@ -306,7 +332,6 @@ export default function FileManagerPage() {
                       />
                     )}
 
-                    {/* Mengubah button menjadi div biasa agar tidak tabrakan elemen interaktif HTML */}
                     <div className="flex items-center gap-2 text-left flex-1 min-w-0 select-none">
                       <Folder className="h-4 w-4 text-navy-700 shrink-0 group-hover:text-navy-900" />
                       <span className="text-xs font-medium text-ink truncate group-hover:underline">{f.name}</span>
@@ -315,7 +340,7 @@ export default function FileManagerPage() {
 
                   {data.writable && (
                     <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => handleRenameFolder(f.path, f.name)} className="p-1 text-ink-muted hover:text-navy-900" title="Ubah Name"><Pencil className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => handleRenameFolder(f.path, f.name)} className="p-1 text-ink-muted hover:text-navy-900" title="Ubah Nama"><Pencil className="h-3.5 w-3.5" /></button>
                       <button onClick={() => handleDeleteFolder(f.path)} className="p-1 text-ink-muted hover:text-red-600" title="Hapus Folder"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
                   )}

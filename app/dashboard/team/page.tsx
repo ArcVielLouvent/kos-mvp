@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { UserPlus } from "lucide-react";
+import { useState, useEffect } from "react";
+import { UserPlus, Loader2 } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { apiJson } from "@/lib/api";
 
@@ -11,6 +11,30 @@ export default function TeamPage() {
   const [msg, setMsg] = useState("");
   const [isSuccess, setIsSuccess] = useState(true);
   const [tempPasswords, setTempPasswords] = useState<Record<string, string> | null>(null);
+
+  // State baru untuk menampung daftar folder dinamis dari database
+  const [availableFolders, setAvailableFolders] = useState<string[]>(["/"]);
+  const [isLoadingFolders, setIsLoadingFolders] = useState(true);
+
+  // Ambil daftar folder asli dari backend secara otomatis saat halaman dibuka
+  useEffect(() => {
+    const fetchFolders = async () => {
+      try {
+        // Memanggil endpoint pembaca root folder (/) untuk melihat subfolder yang tersedia
+        const result = await apiJson("/api/folders/children?path=/");
+        if (result && result.children) {
+          const folderPaths = result.children.map((c: any) => c.path);
+          // Gabungkan root (/) dengan folder anak yang ditemukan di cloud
+          setAvailableFolders(["/", ...folderPaths]);
+        }
+      } catch (e) {
+        console.error("Gagal memuat daftar folder otomatis:", e);
+      } finally {
+        setIsLoadingFolders(false);
+      }
+    };
+    fetchFolders();
+  }, []);
 
   const submit = async () => {
     setMsg("Menyimpan...");
@@ -52,19 +76,32 @@ export default function TeamPage() {
             placeholder="Jabatan (opsional, berlaku untuk semua email di atas)"
             className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:border-navy-500"
           />
-          <select value={folder} onChange={(e) => setFolder(e.target.value)} className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:border-navy-500">
-            <option value="/">/</option>
-            <option value="/SOP/">/SOP/</option>
-          </select>
+
+          {/* MENGUBAH SELECT MENJADI DINAMIS BERDASARKAN ISI SUPABASE */}
+          <div className="space-y-1">
+            <label className="text-2xs font-semibold text-ink-muted">Pilih Hak Akses Direktori Folder</label>
+            <select
+              value={folder}
+              onChange={(e) => setFolder(e.target.value)}
+              disabled={isLoadingFolders}
+              className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:border-navy-500 bg-white disabled:opacity-50"
+            >
+              {availableFolders.map((pathStr) => (
+                <option key={pathStr} value={pathStr}>{pathStr}</option>
+              ))}
+            </select>
+          </div>
+
           <button onClick={submit} className="flex gap-2 rounded bg-navy-900 px-4 py-2 text-sm font-medium text-white hover:bg-navy-800">
             <UserPlus className="h-4 w-4" /> Daftarkan
           </button>
+
           {msg && (
             <p className={`text-sm font-medium ${isSuccess ? "text-green-600" : "text-red-600"}`}>{msg}</p>
           )}
 
           {tempPasswords && Object.keys(tempPasswords).length > 0 && (
-            <div className="overflow-hidden rounded border border-navy-100">
+            <div className="overflow-hidden rounded border border-navy-100 mt-4">
               <table className="w-full text-xs">
                 <thead className="bg-navy-50">
                   <tr>

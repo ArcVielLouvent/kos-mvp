@@ -95,10 +95,12 @@ class QuizGenerateRequest(BaseModel):
 # ====================================================================
 def get_current_user_context(x_user_email: str = Header(None, alias="X-User-Email")) -> dict:
     if not x_user_email:
-        raise HTTPException(status_code=401, detail="Akses ditolak. Sesi tidak ditemukan.")
+        raise HTTPException(
+            status_code=401, detail="Akses ditolak. Sesi tidak ditemukan.")
     user = db.get_user(x_user_email)
     if not user:
-        raise HTTPException(status_code=404, detail="Profil akun tidak ditemukan.")
+        raise HTTPException(
+            status_code=404, detail="Profil akun tidak ditemukan.")
     return user
 
 
@@ -222,7 +224,8 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
                     "Draf berdasarkan pengetahuan umum AI -- BUKAN dokumen resmi. "
                     "Review dulu sebelum dipakai."
                 )
-                db.save_ai_draft(company_id, user["email"], question[:60], draft_content)
+                db.save_ai_draft(
+                    company_id, user["email"], question[:60], draft_content)
 
                 branding = db.get_company_branding(company_id)
                 logo_bytes = None
@@ -236,16 +239,20 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
 
                 if branding.get("docx_template_url"):
                     try:
-                        template_bytes = db.fetch_file_bytes(branding["docx_template_url"])
+                        template_bytes = db.fetch_file_bytes(
+                            branding["docx_template_url"])
                         docx_bytes = ai.create_docx_from_template(
                             template_bytes, title_for_file, draft_content
                         )
                     except Exception:
-                        docx_bytes = ai.create_docx_bytes(title_for_file, draft_content, logo_bytes)
+                        docx_bytes = ai.create_docx_bytes(
+                            title_for_file, draft_content, logo_bytes)
                 else:
-                    docx_bytes = ai.create_docx_bytes(title_for_file, draft_content, logo_bytes)
+                    docx_bytes = ai.create_docx_bytes(
+                        title_for_file, draft_content, logo_bytes)
 
-                pdf_bytes = ai.create_pdf_bytes(title_for_file, draft_content, logo_bytes)
+                pdf_bytes = ai.create_pdf_bytes(
+                    title_for_file, draft_content, logo_bytes)
 
                 generated_files = [
                     {
@@ -263,7 +270,8 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
         # ---------- NIAT: ANALISIS DATA TERSTRUKTUR (XLSX) ----------
         elif ai.is_analysis_request(question):
             mode = "analysis"
-            structured_docs = db.list_structured_documents(company_id, folder_access)
+            structured_docs = db.list_structured_documents(
+                company_id, folder_access)
             if not structured_docs:
                 answer = "Tidak ada data terstruktur (XLSX) yang bisa dianalisis di folder akses Anda."
             else:
@@ -283,7 +291,8 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
                     answer = "Dataset ditemukan tapi tidak ada baris data untuk dianalisis."
                 else:
                     df = pd.DataFrame(sheet["rows"])
-                    criteria = ai.extract_analysis_criteria(question, list(df.columns))
+                    criteria = ai.extract_analysis_criteria(
+                        question, list(df.columns))
 
                     if criteria.get("missing_info"):
                         answer = f"Perlu klarifikasi: {criteria['missing_info']}"
@@ -295,14 +304,17 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
                                 continue
                             if op == ">=":
                                 result_df = result_df[
-                                    pd.to_numeric(result_df[col], errors="coerce") >= float(val)
+                                    pd.to_numeric(
+                                        result_df[col], errors="coerce") >= float(val)
                                 ]
                             elif op == "<=":
                                 result_df = result_df[
-                                    pd.to_numeric(result_df[col], errors="coerce") <= float(val)
+                                    pd.to_numeric(
+                                        result_df[col], errors="coerce") <= float(val)
                                 ]
                             elif op == "==":
-                                result_df = result_df[result_df[col].astype(str) == str(val)]
+                                result_df = result_df[result_df[col].astype(
+                                    str) == str(val)]
                             elif op == "contains":
                                 result_df = result_df[
                                     result_df[col]
@@ -312,7 +324,8 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
                         sort_by = criteria.get("sort_by")
                         if sort_by and sort_by in result_df.columns:
                             result_df = result_df.sort_values(
-                                sort_by, ascending=not criteria.get("sort_desc", False)
+                                sort_by, ascending=not criteria.get(
+                                    "sort_desc", False)
                             )
 
                         answer = (
@@ -325,7 +338,8 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
                             "columns": list(result_df.columns),
                             "rows": records,
                         }
-                        xlsx_bytes = ai.create_xlsx_bytes(best_doc["title"][:31], records)
+                        xlsx_bytes = ai.create_xlsx_bytes(
+                            best_doc["title"][:31], records)
                         analysis_file = {
                             "name": "Hasil Analisis.xlsx",
                             "base64": to_b64(xlsx_bytes),
@@ -350,7 +364,8 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
 
         # ---------- DEFAULT: JAWAB DARI RAG ----------
         else:
-            answer = ai.generate_answer(question, docs) if docs else "Tidak ada referensi dokumen ditemukan di folder Anda."
+            answer = ai.generate_answer(
+                question, docs) if docs else "Tidak ada referensi dokumen ditemukan di folder Anda."
             if docs:
                 for d in docs:
                     if d.get("file_url") and d["id"] not in seen:
@@ -367,7 +382,8 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
             for d in used_sources
         ]
 
-        db.add_chat_message(session_id, "assistant", answer, sources=sources_to_save)
+        db.add_chat_message(session_id, "assistant",
+                            answer, sources=sources_to_save)
 
         return {
             "session_id": session_id,
@@ -380,11 +396,12 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
             "warning": warning,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Kesalahan pada mesin AI: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Kesalahan pada mesin AI: {str(e)}")
 
 
 # ====================================================================
-# FILE MANAGER
+# FILE MANAGER (VERSI PERBAIKAN FORMAT PATH SLASHE)
 # ====================================================================
 @app.get("/api/files")
 async def files_endpoint(
@@ -399,14 +416,29 @@ async def files_endpoint(
         path = base_path
     try:
         folders_raw = db.list_child_folders(company_id, path)
-        docs, total = db.list_documents_in_folder(company_id, path, page=page, page_size=page_size)
-        folders_formatted = [
-            {"path": f, "name": [p for p in f.split("/") if p][-1]} for f in folders_raw
-        ]
+        docs, total = db.list_documents_in_folder(
+            company_id, path, page=page, page_size=page_size)
+
+        # --- PERBAIKAN DI SINI ---
+        folders_formatted = []
+        for f in folders_raw:
+            # 1. Pastikan string path selalu diakhiri dengan '/' agar navigasi Next.js tidak merusak struktur string
+            cleaned_path = f if f.endswith("/") else f"{f}/"
+
+            # 2. Ambil nama folder paling ujung untuk label tampilan UI
+            name = [p for p in cleaned_path.split(
+                "/") if p][-1] if [p for p in cleaned_path.split("/") if p] else cleaned_path
+
+            folders_formatted.append({
+                "path": cleaned_path,
+                "name": name
+            })
+        # -------------------------
+
         return {
             "folders": folders_formatted,
-            "files": docs,
-            "total": total,
+            "files": docs if docs is not None else [],
+            "total": total if total is not None else 0,
             "page": page,
             "pageSize": page_size,
             "writable": can_write(user),
@@ -448,7 +480,8 @@ async def rename_folder_endpoint(
 ):
     require_write(user)
     try:
-        db.rename_folder_cascade(user["company_id"], req.old_path, req.new_name)
+        db.rename_folder_cascade(
+            user["company_id"], req.old_path, req.new_name)
         return {"status": "success", "message": "Folder berhasil diganti nama."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -599,7 +632,8 @@ def _process_single_upload(filename: str, file_bytes: bytes) -> dict:
                 except Exception:
                     content = ""
             if len(content.strip()) < 50:
-                content = ai.extract_multimodal(temp, "application/pdf", filename)
+                content = ai.extract_multimodal(
+                    temp, "application/pdf", filename)
             chunks = ai.chunk_text(content)
             tipe_file = "Dokumen PDF"
 
@@ -716,9 +750,11 @@ async def add_employees_endpoint(
     req: EmployeeBulkRequest, user: dict = Depends(get_current_user_context)
 ):
     require_write(user)
-    email_list = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", req.emails)
+    email_list = re.findall(
+        r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", req.emails)
     if not email_list:
-        raise HTTPException(status_code=400, detail="Tidak ada email valid ditemukan.")
+        raise HTTPException(
+            status_code=400, detail="Tidak ada email valid ditemukan.")
     temp_passwords = db.add_users_bulk(
         email_list, req.folder, user["company_id"], position_title=req.position_title
     )
@@ -768,7 +804,8 @@ async def upload_template_endpoint(
 ):
     require_write(user)
     file_bytes = await file.read()
-    url = db.upload_company_template(user["company_id"], file_bytes, file.filename)
+    url = db.upload_company_template(
+        user["company_id"], file_bytes, file.filename)
     return {"status": "success", "docx_template_url": url}
 
 
@@ -777,7 +814,8 @@ async def upload_template_endpoint(
 # ====================================================================
 @app.get("/api/team/users")
 async def list_users_endpoint(user: dict = Depends(get_current_user_context)):
-    users_list = db.list_managed_users(user["company_id"], user["folder_access"], user["role"])
+    users_list = db.list_managed_users(
+        user["company_id"], user["folder_access"], user["role"])
     return {"users": users_list}
 
 
@@ -810,7 +848,8 @@ async def add_report_endpoint(
     user: dict = Depends(get_current_user_context),
 ):
     if not (content and content.strip()) and not media:
-        raise HTTPException(status_code=400, detail="Isi laporan teks atau upload media dulu.")
+        raise HTTPException(
+            status_code=400, detail="Isi laporan teks atau upload media dulu.")
 
     media_url = None
     media_type = "text"
@@ -840,7 +879,8 @@ async def get_my_reports_endpoint(user: dict = Depends(get_current_user_context)
 # ====================================================================
 @app.get("/api/quizzes")
 async def list_quizzes_endpoint(user: dict = Depends(get_current_user_context)):
-    quizzes = db.list_quizzes_for_folder(user["company_id"], user["folder_access"])
+    quizzes = db.list_quizzes_for_folder(
+        user["company_id"], user["folder_access"])
     return {"quizzes": quizzes}
 
 
@@ -901,10 +941,12 @@ async def generate_quiz_endpoint(
     try:
         questions = ai.generate_quiz_questions(content, req.num_questions)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gagal generate soal: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Gagal generate soal: {str(e)}")
 
     if not questions:
-        raise HTTPException(status_code=500, detail="AI tidak menghasilkan soal yang valid, coba lagi.")
+        raise HTTPException(
+            status_code=500, detail="AI tidak menghasilkan soal yang valid, coba lagi.")
 
     quiz_id = db.create_quiz(
         user["company_id"], req.folder_path, req.title or "Kuis",
@@ -921,14 +963,17 @@ async def generate_quiz_endpoint(
 async def dashboard_endpoint(user: dict = Depends(get_current_user_context)):
     try:
         company_id = user["company_id"]
-        _, doc_count = db.list_documents_in_folder(company_id, "/", page_size=1)
+        _, doc_count = db.list_documents_in_folder(
+            company_id, "/", page_size=1)
         users = db.list_managed_users(company_id, "/", "SuperAdmin")
         folders = db.get_unique_folders(company_id)
         return {
             "stats": [
                 {"label": "Total Dokumen", "value": doc_count},
-                {"label": "Total Karyawan", "value": len(users) if users else 0},
-                {"label": "Total Folder", "value": len(folders) if folders else 0},
+                {"label": "Total Karyawan", "value": len(
+                    users) if users else 0},
+                {"label": "Total Folder", "value": len(
+                    folders) if folders else 0},
                 {"label": "Status Sistem", "value": "Aktif"},
             ],
             "recent": [],

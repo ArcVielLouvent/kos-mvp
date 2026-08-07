@@ -238,62 +238,97 @@ export default function FileManagerPage() {
           </div>
         )}
 
+        {/* 1. BARIS OPERASI MASSAL (BULK DELETE) */}
         {data.writable && totalSelected > 0 && (
-          <div className="flex items-center gap-4 rounded border border-navy-100 bg-white p-3">
-            <span className="text-xs font-medium text-ink-muted">{totalSelected} dipilih</span>
-            <button onClick={handleBulkDelete} className="flex items-center gap-1.5 rounded bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700">
-              <Trash2 className="h-3.5 w-3.5" /> Hapus terpilih
+          <div className="flex items-center justify-between gap-4 rounded-[var(--radius-card)] border border-red-100 bg-red-50 p-3 shadow-2xs animate-fade-in">
+            <span className="text-xs font-semibold text-red-700">{totalSelected} item terpilih untuk dihapus</span>
+            <button
+              onClick={handleBulkDelete}
+              className="flex items-center gap-1.5 rounded bg-red-600 px-3 py-1.5 text-2xs font-bold text-white hover:bg-red-700 shadow-sm"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Hapus Terpilih Secara Permanen
             </button>
           </div>
         )}
 
+        {/* 2. AREA TAMPILAN UTAMA DIREKTORI & FILE */}
         {isLoading ? (
-          <p className="animate-pulse text-sm text-ink-muted">Sinkronisasi data cloud...</p>
+          <p className="animate-pulse text-sm text-ink-muted">Menyinkronkan data cloud...</p>
         ) : (
           <div className="space-y-4">
+
+            {/* AREA A: DAFTAR FOLDER */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {data.folders?.map((f: any) => (
-                <div key={f.path} className="group flex items-center gap-2 rounded-[var(--radius-card)] border border-navy-100 bg-white p-3 hover:bg-navy-50">
-                  {data.writable && (
-                    <input type="checkbox" checked={selectedFolders.has(f.path)} onChange={() => toggleFolder(f.path)} className="shrink-0" />
-                  )}
-                  <button onClick={() => setCurrentPath(f.path)} className="flex items-center gap-2 text-left flex-1 min-w-0">
-                    <Folder className="h-4 w-4 text-navy-700 shrink-0" />
-                    <span className="text-xs font-medium text-ink truncate">{f.name}</span>
-                  </button>
+                <div key={f.path} className="group flex items-center justify-between rounded-[var(--radius-card)] border border-navy-100 bg-white p-3 hover:bg-navy-50 shadow-sm transition-all">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    {data.writable && (
+                      <input
+                        type="checkbox"
+                        checked={selectedFolders.has(f.path)}
+                        onChange={() => toggleFolder(f.path)}
+                        className="rounded border-navy-300 accent-navy-900 cursor-pointer h-3.5 w-3.5 shrink-0"
+                      />
+                    )}
+                    {/* DISINI PERBAIKANNYA: Tombol navigasi masuk sub-folder */}
+                    <button
+                      onClick={() => setCurrentPath(f.path)}
+                      className="flex items-center gap-2 text-left flex-1 min-w-0 group/btn"
+                    >
+                      <Folder className="h-4 w-4 text-navy-700 shrink-0 group-hover/btn:text-navy-900" />
+                      <span className="text-xs font-medium text-ink truncate group-hover/btn:underline">{f.name}</span>
+                    </button>
+                  </div>
+
+                  {/* Aksi khusus Admin: Ubah nama dan Hapus Folder tunggal */}
                   {data.writable && (
                     <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => handleRenameFolder(f.path, f.name)} className="p-1 hover:text-navy-700"><Pencil className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => handleDeleteFolder(f.path)} className="p-1 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => handleRenameFolder(f.path, f.name)} className="p-1 text-ink-muted hover:text-navy-900" title="Ubah Nama"><Pencil className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => handleDeleteFolder(f.path)} className="p-1 text-ink-muted hover:text-red-600" title="Hapus Folder"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
                   )}
                 </div>
               ))}
             </div>
 
-            <div className="overflow-hidden rounded-[var(--radius-card)] border border-navy-100 bg-white">
+            {/* AREA B: DAFTAR BERKAS FILE */}
+            <div className="overflow-hidden rounded-[var(--radius-card)] border border-navy-100 bg-white shadow-xs">
               {data.files?.length === 0 ? (
-                <p className="p-8 text-xs text-ink-faint text-center">Folder ini kosong.</p>
+                <p className="p-8 text-xs text-ink-faint text-center">Folder ini kosong atau belum memiliki dokumen.</p>
               ) : (
                 data.files?.map((f: any) => (
-                  <div key={f.id} className="group flex items-center gap-3 border-b border-navy-100 px-4 py-2.5 hover:bg-navy-50">
-                    {data.writable && (
-                      <input type="checkbox" checked={selectedDocs.has(f.id)} onChange={() => toggleDoc(f.id)} />
-                    )}
-                    <DocumentBadge type={f.metadata?.tipe_file || "default"} size="sm" />
-                    <span className="flex-1 text-xs font-medium text-ink truncate">{f.title}</span>
-                    <span className="text-2xs text-ink-faint">{(f.created_at || "").slice(0, 10)}</span>
+                  <div key={f.id} className="group flex items-center justify-between border-b border-navy-100 px-4 py-2.5 hover:bg-navy-50 transition-all">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      {data.writable && (
+                        <input
+                          type="checkbox"
+                          checked={selectedDocs.has(f.id)}
+                          onChange={() => toggleDoc(f.id)}
+                          className="rounded border-navy-300 accent-navy-900 cursor-pointer h-3.5 w-3.5"
+                        />
+                      )}
+                      <DocumentBadge type={f.metadata?.tipe_file || "pdf"} size="sm" />
+                      <span className="text-xs font-medium text-ink truncate max-w-md">{f.title}</span>
+                      <span className="text-2xs text-ink-faint font-mono hidden sm:inline-block">{(f.created_at || "").slice(0, 10)}</span>
+                    </div>
+
+                    {/* Aksi Berkas: Unduh File Asli & Manajemen Lokasi Cloud */}
                     <div className="flex items-center gap-2">
                       {f.file_url && (
-                        <a href={f.file_url} target="_blank" rel="noreferrer" className="rounded border px-2 py-1 text-2xs font-medium text-ink-muted hover:bg-white flex items-center gap-1">
+                        <a
+                          href={f.file_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded border border-navy-100 bg-white px-2.5 py-1 text-2xs font-semibold text-ink-muted hover:bg-navy-50 flex items-center gap-1 shadow-2xs transition-colors"
+                        >
                           <Download className="h-3 w-3" /> Unduh
                         </a>
                       )}
                       {data.writable && (
-                        <>
-                          <button onClick={() => handleMoveDoc(f.id)} className="opacity-0 group-hover:opacity-100 p-1 hover:text-navy-700 transition-opacity"><Move className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => handleDeleteDoc(f.id)} className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-600 transition-opacity"><Trash2 className="h-3.5 w-3.5" /></button>
-                        </>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => handleMoveDoc(f.id)} className="p-1 text-ink-muted hover:text-navy-700" title="Pindahkan Berkas"><Move className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => handleDeleteDoc(f.id)} className="p-1 text-ink-muted hover:text-red-600" title="Hapus Berkas"><Trash2 className="h-3.5 w-3.5" /></button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -301,13 +336,24 @@ export default function FileManagerPage() {
               )}
             </div>
 
+            {/* AREA C: NAVIGASI HALAMAN (PAGINATION) */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-center gap-4">
-                <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium text-ink-muted disabled:opacity-40">
+              <div className="flex items-center justify-center gap-4 pt-2">
+                <button
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium text-ink-muted bg-white disabled:opacity-40 hover:bg-navy-50 transition-all shadow-2xs"
+                >
                   <ChevronLeft className="h-3.5 w-3.5" /> Sebelumnya
                 </button>
-                <span className="text-xs text-ink-faint">Halaman {page} dari {totalPages} ({data.total} file)</span>
-                <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium text-ink-muted disabled:opacity-40">
+                <span className="text-xs font-medium text-ink-faint">
+                  Halaman {page} dari {totalPages} <span className="opacity-60">({data.total} file total)</span>
+                </span>
+                <button
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  className="flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium text-ink-muted bg-white disabled:opacity-40 hover:bg-navy-50 transition-all shadow-2xs"
+                >
                   Berikutnya <ChevronRight className="h-3.5 w-3.5" />
                 </button>
               </div>

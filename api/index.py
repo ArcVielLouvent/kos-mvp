@@ -138,4 +138,3 @@ async def dashboard_endpoint():
     except Exception as e:
         return {"stats": [{"label": "Total Dokumen", "value": 0}, {"label": "Total Karyawan", "value": 0}], "recent": []}
 
-app = app

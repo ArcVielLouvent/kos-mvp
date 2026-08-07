@@ -401,7 +401,7 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
 
 
 # ====================================================================
-# FILE MANAGER (VERSI REPLIKASI TOTAL - TAHAN BANTING)
+# FILE MANAGER (VERSI AKURASI TINGGI - ANTI DATA KOSONG)
 # ====================================================================
 @app.get("/api/files")
 async def files_endpoint(
@@ -412,8 +412,8 @@ async def files_endpoint(
 ):
     company_id = user["company_id"]
     base_path = base_path_for(user)
-
-    # Standardisasi awal path: Pastikan selalu diawali dan diakhiri dengan '/'
+    
+    # 1. Normalisasi string path input dari Next.js
     if not path.startswith("/"):
         path = "/" + path
     if not path.endswith("/"):
@@ -423,25 +423,38 @@ async def files_endpoint(
         path = base_path
 
     try:
+        # 2. Ambil folder mentah dari db.py Anda
         folders_raw = db.list_child_folders(company_id, path)
-        docs, total = db.list_documents_in_folder(
-            company_id, path, page=page, page_size=page_size)
+        
+        # --- PENANGANAN KHUSUS ROOT DRIVE COBA JALUR CADANGAN JIKA KOSONG ---
+        if (not folders_raw or len(folders_raw) == 0) and path == "/":
+            # Jika kueri root strict gagal, ambil semua folder unik milik perusahaan ini (dari db.py)
+            all_folders = db.get_unique_folders(company_id)
+            if all_folders:
+                # Filter folder yang berada di tingkat paling atas (tidak memiliki sub-folder induk)
+                # Contoh: Mengambil '/Tutorial/' dan membuang '/Penilaian Karyawan/KPI/'
+                folders_raw = [
+                    f for f in all_folders 
+                    if len([p for p in f.strip("/").split("/") if p]) == 1
+                ]
+        # ----------------==================================-----------------
 
-        # PROSES FORMATTING PATH YANG AMAN UNTUK NEXT.JS
+        docs, total = db.list_documents_in_folder(company_id, path, page=page, page_size=page_size)
+        
+        # 3. Format data folder untuk kebutuhan rendering visual komponen Next.js
         folders_formatted = []
-        for f in folders_raw:
-            # Pastikan setiap path folder anak yang dikirim ke frontend selalu bersih & diakhiri dengan '/'
-            cleaned_path = f if f.endswith("/") else f"{f}/"
-            if not cleaned_path.startswith("/"):
-                cleaned_path = "/" + cleaned_path
-
-            name = [p for p in cleaned_path.split(
-                "/") if p][-1] if [p for p in cleaned_path.split("/") if p] else cleaned_path
-
-            folders_formatted.append({
-                "path": cleaned_path,
-                "name": name
-            })
+        if folders_raw:
+            for f in folders_raw:
+                cleaned_path = f if f.endswith("/") else f"{f}/"
+                if not cleaned_path.startswith("/"):
+                    cleaned_path = "/" + cleaned_path
+                    
+                name = [p for p in cleaned_path.split("/") if p][-1] if [p for p in cleaned_path.split("/") if p] else cleaned_path
+                
+                folders_formatted.append({
+                    "path": cleaned_path,
+                    "name": name
+                })
 
         return {
             "folders": folders_formatted,
@@ -454,6 +467,7 @@ async def files_endpoint(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.get("/api/folders/children")

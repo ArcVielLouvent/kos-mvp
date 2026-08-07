@@ -4,8 +4,10 @@ import { Plus, Send, MoreVertical, Sparkles, Bot, Loader2 } from "lucide-react";
 import { DocumentBadge } from "@/components/DocumentBadge";
 import { cn } from "@/lib/utils";
 
-// API URL (Kalau di Vercel nanti otomatis pakai URL produksi, kalau lokal pakai localhost)
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// API URL dinamis (Vercel otomatis pakai domain produksi kosong, lokal pakai localhost)
+const API_URL = typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8000"
+    : "";
 
 interface Message {
     id: string;
@@ -29,6 +31,9 @@ export default function ChatPage() {
     const sendMessage = async () => {
         if (!input.trim() || isLoading) return;
 
+        // Ambil token JWT session user yang tersimpan dari localStorage atau cookies saat login
+        const token = typeof window !== "undefined" ? localStorage.getItem("sb-access-token") || localStorage.getItem("supabase_token") : null;
+
         const userMessage: Message = {
             id: Date.now().toString(),
             role: "user",
@@ -40,12 +45,20 @@ export default function ChatPage() {
         setIsLoading(true);
 
         try {
-            // INI ADALAH KODE YANG MENEMBAK KE BACKEND PYTHON (FASTAPI)
-            const response = await fetch(`/api/chat`, {
+            // MENGGUNAKAN API_URL DINAMIS DAN MENYUNTIKKAN AUTHORIZATION HEADER
+            const response = await fetch(`${API_URL}/api/chat`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: userMessage.content, user_id: "admin@kopinusantara.com" }),
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}` // Identitas user otomatis dibaca backend dari sini
+                },
+                body: JSON.stringify({ message: userMessage.content }), // Bersih tanpa parameter user_id manual
             });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || "Gagal mendapatkan respons dari server.");
+            }
 
             const data = await response.json();
 
@@ -58,10 +71,10 @@ export default function ChatPage() {
             };
 
             setMessages((prev) => [...prev, botMessage]);
-        } catch (error) {
+        } catch (error: any) {
             setMessages((prev) => [
                 ...prev,
-                { id: Date.now().toString(), role: "assistant", content: "Error: Tidak dapat terhubung ke Backend Python." }
+                { id: Date.now().toString(), role: "assistant", content: `Error: ${error.message || "Tidak dapat terhubung ke Backend Python."}` }
             ]);
         } finally {
             setIsLoading(false);
@@ -81,7 +94,7 @@ export default function ChatPage() {
                     </button>
                 </div>
                 <div className="flex-1 p-3">
-                    <p className="px-2 text-xs text-ink-faint">Sesi saat ini (Belum tersambung database)</p>
+                    <p className="px-2 text-xs text-ink-faint">Sesi saat ini (Tersambung via Token JWT)</p>
                 </div>
             </div>
 

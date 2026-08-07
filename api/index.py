@@ -401,21 +401,34 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
             status_code=500, detail=f"Kesalahan pada mesin AI: {str(e)}")
 
 
+def normalize_folder(path: str) -> str:
+    """Defensif: apa pun inputnya (None, '', 'files', '/files', '/files/'),
+    selalu hasilkan format konsisten dengan leading+trailing slash."""
+    if not path or path.strip() in ("", "files", "root", "undefined", "null"):
+        return "/"
+    p = path.strip()
+    if not p.startswith("/"):
+        p = "/" + p
+    if not p.endswith("/"):
+        p += "/"
+    return p
+
 # ====================================================================
-# FILE MANAGER (VERSI DINAMIS USER EMAIL - FIX TOTAL 401)
+# FILE MANAGER (VERSI PENYELARASAN FINAL - AMAN & BERSIH)
 # ====================================================================
+
+
 @app.get("/api/files")
 async def files_endpoint(
     path: str = "/",
     page: int = 1,
     page_size: int = PAGE_SIZE_DEFAULT,
-    user_id: str = None  # Menangkap parameter user_id dinamis dari Next.js
+    user_id: str = None
 ):
     if not user_id:
         raise HTTPException(
             status_code=400, detail="Parameter user_id wajib disertakan.")
 
-    # Ambil konteks user menggunakan fungsi db.get_user bawaan Anda lewat email yang dikirim frontend
     user = db.get_user(user_id)
     if not user:
         raise HTTPException(
@@ -424,29 +437,26 @@ async def files_endpoint(
     company_id = user["company_id"]
     base_path = base_path_for(user)
 
-    # Menghindari bug double slash (//)
-    if path != "/":
-        if not path.startswith("/"):
-            path = "/" + path
-        if not path.endswith("/"):
-            path = path + "/"
-
-    if not path.startswith(base_path):
-        path = base_path
-
     try:
-        # Ambil data folder & file asli dari Supabase
+        # 1. Decode karakter %20 internet menjadi spasi asli
+        path = urllib.parse.unquote(path)
+
+        # 2. Eksekusi pengaman defensif Claude
+        path = normalize_folder(path)
+
+        if not path.startswith(base_path):
+            path = base_path
+
+        # 3. Panggil kueri asli utama Anda (BLOK TOLERANSI LEMAH SUDAH DIHAPUS TOTAL)
         folders_raw = db.list_child_folders(company_id, path)
         docs, total = db.list_documents_in_folder(
             company_id, path, page=page, page_size=page_size)
 
+        # 4. Format data folder untuk Next.js
         folders_formatted = []
         if folders_raw:
             for f in folders_raw:
-                cleaned_path = f if f.endswith("/") else f"{f}/"
-                if not cleaned_path.startswith("/"):
-                    cleaned_path = "/" + cleaned_path
-
+                cleaned_path = normalize_folder(f)
                 name = [p for p in cleaned_path.split(
                     "/") if p][-1] if [p for p in cleaned_path.split("/") if p] else cleaned_path
 

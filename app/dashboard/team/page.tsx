@@ -2,46 +2,34 @@
 import { useState } from "react";
 import { UserPlus } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
-
-// API URL dinamis (Vercel otomatis pakai domain produksi kosong, lokal pakai localhost)
-const API_URL = typeof window !== "undefined" && window.location.hostname === "localhost"
-  ? "http://localhost:8000"
-  : "";
+import { apiJson } from "@/lib/api";
 
 export default function TeamPage() {
   const [emails, setEmails] = useState("");
   const [folder, setFolder] = useState("/");
+  const [positionTitle, setPositionTitle] = useState("");
   const [msg, setMsg] = useState("");
   const [isSuccess, setIsSuccess] = useState(true);
+  const [tempPasswords, setTempPasswords] = useState<Record<string, string> | null>(null);
 
   const submit = async () => {
     setMsg("Menyimpan...");
-
-    // Ambil token JWT session user yang tersimpan dari localStorage saat login
-    const token = typeof window !== "undefined" ? localStorage.getItem("sb-access-token") || localStorage.getItem("supabase_token") : null;
+    setTempPasswords(null);
 
     try {
-      const res = await fetch(`${API_URL}/api/team`, {
+      const data = await apiJson("/api/team/employees", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}` // Identitas pengirim otomatis terdeteksi di backend
-        },
-        body: JSON.stringify({ emails, folder }) // Bersih tanpa parameter user_id manual
+        body: JSON.stringify({ emails, folder, position_title: positionTitle || undefined }),
       });
 
-      const data = await res.json();
-
-      if (res.ok && data.status === "success") {
-        setIsSuccess(true);
-        setEmails(""); // Bersihkan input teks jika sukses
-      } else {
-        setIsSuccess(false);
-      }
+      setIsSuccess(true);
+      setEmails("");
+      setPositionTitle("");
+      setTempPasswords(data.temporaryPasswords || null);
       setMsg(data.message || "Proses pendaftaran tim selesai.");
     } catch (err: any) {
       setIsSuccess(false);
-      setMsg("Error: Gagal terhubung dengan server.");
+      setMsg(err.message || "Gagal terhubung dengan server.");
     }
   };
 
@@ -52,12 +40,19 @@ export default function TeamPage() {
         <div className="max-w-lg space-y-4 rounded-[var(--radius-card)] border border-navy-100 bg-white p-6">
           <textarea
             value={emails}
-            onChange={e => setEmails(e.target.value)}
+            onChange={(e) => setEmails(e.target.value)}
             rows={4}
             placeholder="Masukkan email karyawan (pisahkan dengan baris baru untuk mendaftarkan massal)..."
             className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:border-navy-500"
           />
-          <select value={folder} onChange={e => setFolder(e.target.value)} className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:border-navy-500">
+          <input
+            type="text"
+            value={positionTitle}
+            onChange={(e) => setPositionTitle(e.target.value)}
+            placeholder="Jabatan (opsional, berlaku untuk semua email di atas)"
+            className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:border-navy-500"
+          />
+          <select value={folder} onChange={(e) => setFolder(e.target.value)} className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:border-navy-500">
             <option value="/">/</option>
             <option value="/SOP/">/SOP/</option>
           </select>
@@ -65,9 +60,28 @@ export default function TeamPage() {
             <UserPlus className="h-4 w-4" /> Daftarkan
           </button>
           {msg && (
-            <p className={`text-sm font-medium ${isSuccess ? "text-green-600" : "text-red-600"}`}>
-              {msg}
-            </p>
+            <p className={`text-sm font-medium ${isSuccess ? "text-green-600" : "text-red-600"}`}>{msg}</p>
+          )}
+
+          {tempPasswords && Object.keys(tempPasswords).length > 0 && (
+            <div className="overflow-hidden rounded border border-navy-100">
+              <table className="w-full text-xs">
+                <thead className="bg-navy-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium text-ink-muted">Email</th>
+                    <th className="px-3 py-2 text-left font-medium text-ink-muted">Password sementara</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(tempPasswords).map(([email, pw]) => (
+                    <tr key={email} className="border-t border-navy-100">
+                      <td className="px-3 py-2">{email}</td>
+                      <td className="px-3 py-2 font-mono-data">{pw}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>

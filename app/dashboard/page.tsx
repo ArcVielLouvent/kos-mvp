@@ -2,19 +2,9 @@
 import { useState, useEffect } from "react";
 import { TopBar } from "@/components/TopBar";
 import { DocumentBadge } from "@/components/DocumentBadge";
-import {
-    FileText,
-    Users,
-    FolderTree,
-    MessageSquare,
-    ArrowUpRight,
-} from "lucide-react";
+import { FileText, Users, FolderTree, MessageSquare, ArrowUpRight } from "lucide-react";
+import { apiJson } from "@/lib/api";
 
-const API_URL = typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8000"
-    : "";
-
-// Mapping icon berdasarkan label dari Backend
 const ICON_MAP: Record<string, any> = {
     "Total Dokumen": { icon: FileText, tint: "bg-navy-900" },
     "Total Karyawan": { icon: Users, tint: "bg-navy-700" },
@@ -28,22 +18,13 @@ export default function DashboardPage() {
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        const token = typeof window !== "undefined" ? localStorage.getItem("sb-access-token") || localStorage.getItem("supabase_token") : null;
-
-        fetch(`${API_URL}/api/dashboard`, {
-            method: "GET",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`
-            }
-        })
-            .then(res => res.json())
-            .then(result => {
+        apiJson("/api/dashboard")
+            .then((result) => {
                 if (result.stats) setStats(result.stats);
                 if (result.recent) setRecentActivity(result.recent);
                 setIsLoading(false);
             })
-            .catch(err => {
+            .catch((err) => {
                 console.error("Dashboard Fetch Error:", err);
                 setIsLoading(false);
             });
@@ -57,7 +38,6 @@ export default function DashboardPage() {
                     <p className="animate-pulse text-sm text-ink-muted">Memuat statistik real-time...</p>
                 ) : (
                     <>
-                        {/* Area Komponen Kartu Statistik */}
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                             {stats.map((stat) => {
                                 const config = ICON_MAP[stat.label] || { icon: FileText, tint: "bg-navy-900" };
@@ -75,7 +55,6 @@ export default function DashboardPage() {
                         </div>
 
                         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                            {/* Area Folder - (Bisa dihubungkan ke breakdown backend nanti jika diperlukan) */}
                             <div className="rounded-[var(--radius-card)] border border-navy-100 bg-white p-6 shadow-[var(--shadow-card)] lg:col-span-2">
                                 <div className="mb-4 flex items-center justify-between">
                                     <h3 className="text-sm font-semibold text-ink">Dokumen Sistem</h3>
@@ -86,16 +65,15 @@ export default function DashboardPage() {
                                 <p className="text-xs text-ink-faint">Semua folder dan berkas tersinkronisasi otomatis dengan hak akses cloud.</p>
                             </div>
 
-                            {/* Aktivitas Terbaru */}
                             <div className="rounded-[var(--radius-card)] border border-navy-100 bg-white p-6 shadow-[var(--shadow-card)]">
                                 <h3 className="mb-4 text-sm font-semibold text-ink">Aktivitas Terbaru</h3>
                                 <div className="space-y-4">
                                     {recentActivity.length === 0 ? (
-                                        <p className="text-xs text-ink-muted">Belum ada log log aktivitas terbaru.</p>
+                                        <p className="text-xs text-ink-muted">Belum ada log aktivitas terbaru.</p>
                                     ) : (
                                         recentActivity.map((a, i) => (
                                             <div key={i} className="flex items-start gap-3">
-                                                <DocumentBadge type={a.type || "pdf"} size="sm" />
+                                                <DocumentBadge type={a.type || "default"} size="sm" />
                                                 <div className="min-w-0 flex-1">
                                                     <p className="truncate text-sm font-medium text-ink">{a.title}</p>
                                                     <p className="text-xs text-ink-faint">{a.who} · {a.time}</p>

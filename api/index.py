@@ -401,7 +401,7 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
 
 
 # ====================================================================
-# FILE MANAGER (VERSI PERBAIKAN FORMAT PATH SLASHE)
+# FILE MANAGER (VERSI REPLIKASI TOTAL - TAHAN BANTING)
 # ====================================================================
 @app.get("/api/files")
 async def files_endpoint(
@@ -412,20 +412,29 @@ async def files_endpoint(
 ):
     company_id = user["company_id"]
     base_path = base_path_for(user)
+
+    # Standardisasi awal path: Pastikan selalu diawali dan diakhiri dengan '/'
+    if not path.startswith("/"):
+        path = "/" + path
+    if not path.endswith("/"):
+        path = path + "/"
+
     if not path.startswith(base_path):
         path = base_path
+
     try:
         folders_raw = db.list_child_folders(company_id, path)
         docs, total = db.list_documents_in_folder(
             company_id, path, page=page, page_size=page_size)
 
-        # --- PERBAIKAN DI SINI ---
+        # PROSES FORMATTING PATH YANG AMAN UNTUK NEXT.JS
         folders_formatted = []
         for f in folders_raw:
-            # 1. Pastikan string path selalu diakhiri dengan '/' agar navigasi Next.js tidak merusak struktur string
+            # Pastikan setiap path folder anak yang dikirim ke frontend selalu bersih & diakhiri dengan '/'
             cleaned_path = f if f.endswith("/") else f"{f}/"
+            if not cleaned_path.startswith("/"):
+                cleaned_path = "/" + cleaned_path
 
-            # 2. Ambil nama folder paling ujung untuk label tampilan UI
             name = [p for p in cleaned_path.split(
                 "/") if p][-1] if [p for p in cleaned_path.split("/") if p] else cleaned_path
 
@@ -433,7 +442,6 @@ async def files_endpoint(
                 "path": cleaned_path,
                 "name": name
             })
-        # -------------------------
 
         return {
             "folders": folders_formatted,

@@ -28,10 +28,11 @@ export default function FileManagerPage() {
   const [selectedFolders, setSelectedFolders] = useState<Set<string>>(new Set());
   const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set());
 
-  const loadFiles = async () => {
+    const loadFiles = async () => {
     setIsLoading(true);
     try {
-      const result = await apiJson(`/api/files?path=${encodeURIComponent(currentPath)}&page=${page}&page_size=${PAGE_SIZE}`);
+      // HAPUS encodeURIComponent, kirim currentPath langsung secara bersih
+      const result = await apiJson(`/api/files?path=${currentPath}&page=${page}&page_size=${PAGE_SIZE}`);
       setData(result);
       setActionMsg("");
     } catch (e: any) {
@@ -40,6 +41,7 @@ export default function FileManagerPage() {
       setIsLoading(false);
     }
   };
+
 
   useEffect(() => {
     loadFiles();

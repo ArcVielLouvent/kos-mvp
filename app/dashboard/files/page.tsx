@@ -286,36 +286,43 @@ export default function FileManagerPage() {
             {/* AREA A: DAFTAR FOLDER */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {data.folders?.map((f: any) => (
-                <div key={f.path} className="group flex items-center justify-between rounded-[var(--radius-card)] border border-navy-100 bg-white p-3 hover:bg-navy-50 shadow-sm transition-all">
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                <div
+                  key={f.path}
+                  // KUNCI PERBAIKAN 1: Klik area kotak putih manapun otomatis akan langsung masuk ke dalam folder!
+                  onClick={() => setCurrentPath(f.path)}
+                  className="group flex items-center justify-between rounded-[var(--radius-card)] border border-navy-100 bg-white p-3 hover:bg-navy-50 shadow-sm transition-all cursor-pointer"
+                >
+                  <div className="flex items-center gap-2 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
                     {data.writable && (
                       <input
                         type="checkbox"
                         checked={selectedFolders.has(f.path)}
-                        onChange={() => toggleFolder(f.path)}
+                        // KUNCI PERBAIKAN 2: Menggunakan e.stopPropagation() agar centang checkbox tidak memicu masuk folder
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          toggleFolder(f.path);
+                        }}
                         className="rounded border-navy-300 accent-navy-900 cursor-pointer h-3.5 w-3.5 shrink-0"
                       />
                     )}
-                    {/* DISINI PERBAIKANNYA: Tombol navigasi masuk sub-folder */}
-                    <button
-                      onClick={() => setCurrentPath(f.path)}
-                      className="flex items-center gap-2 text-left flex-1 min-w-0 group/btn"
-                    >
-                      <Folder className="h-4 w-4 text-navy-700 shrink-0 group-hover/btn:text-navy-900" />
-                      <span className="text-xs font-medium text-ink truncate group-hover/btn:underline">{f.name}</span>
-                    </button>
+
+                    {/* Mengubah button menjadi div biasa agar tidak tabrakan elemen interaktif HTML */}
+                    <div className="flex items-center gap-2 text-left flex-1 min-w-0 select-none">
+                      <Folder className="h-4 w-4 text-navy-700 shrink-0 group-hover:text-navy-900" />
+                      <span className="text-xs font-medium text-ink truncate group-hover:underline">{f.name}</span>
+                    </div>
                   </div>
 
-                  {/* Aksi khusus Admin: Ubah nama dan Hapus Folder tunggal */}
                   {data.writable && (
-                    <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => handleRenameFolder(f.path, f.name)} className="p-1 text-ink-muted hover:text-navy-900" title="Ubah Nama"><Pencil className="h-3.5 w-3.5" /></button>
+                    <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                      <button onClick={() => handleRenameFolder(f.path, f.name)} className="p-1 text-ink-muted hover:text-navy-900" title="Ubah Name"><Pencil className="h-3.5 w-3.5" /></button>
                       <button onClick={() => handleDeleteFolder(f.path)} className="p-1 text-ink-muted hover:text-red-600" title="Hapus Folder"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
                   )}
                 </div>
               ))}
             </div>
+
 
             {/* AREA B: DAFTAR BERKAS FILE */}
             <div className="overflow-hidden rounded-[var(--radius-card)] border border-navy-100 bg-white shadow-xs">

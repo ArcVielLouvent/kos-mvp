@@ -432,11 +432,20 @@ async def files_endpoint(
         # 1. Decode karakter %20 internet menjadi spasi asli
         path = urllib.parse.unquote(path)
 
-        # 2. Eksekusi pengaman defensif Claude
+        # 2. Eksekusi pengaman defensif (VERSI FIX DENGAN DEBUG LOG)
         path = normalize_folder(path)
+        
+        # LOG DEBUG: Mengintip parameter yang masuk ke server
+        print(f"[DEBUG-API] USER ROLE: {user.get('role')} | COMPANY ID: {company_id}")
+        print(f"[DEBUG-API] PATH AWAL: '{path}' | BASE PATH USER: '{base_path}'")
 
-        if not path.startswith(base_path):
+        # Pengaman: Hanya cek startswith jika base_path user dibatasi (bukan "/")
+        if base_path != "/" and not path.startswith(base_path):
+            print(f"[DEBUG-API] !PERINGATAN! Path '{path}' melanggar hak akses. Reset ke '{base_path}'")
             path = base_path
+        else:
+            print(f"[DEBUG-API] AKURAT: Path '{path}' lolos validasi hak akses.")
+
 
         # 3. Panggil kueri asli utama Anda (BLOK TOLERANSI LEMAH SUDAH DIHAPUS TOTAL)
         folders_raw = db.list_child_folders(company_id, path)

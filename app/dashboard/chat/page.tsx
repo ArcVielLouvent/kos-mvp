@@ -388,7 +388,7 @@ export default function ChatPage() {
                 )}
 
                 <div className="border-t border-navy-100 bg-white p-4">
-                    <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-[var(--radius-card)] border border-navy-100 px-4 py-2.5 focus-within:border-navy-500">
+                    <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-[var(--radius-card)] border border-navy-100 px-4 py-3.5 focus-within:border-navy-500">
                         <textarea
                             ref={textareaRef}
                             value={input}

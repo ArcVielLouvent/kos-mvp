@@ -62,3 +62,17 @@ h4 {
         transition-duration: 0.01ms !important;
     }
 }
+
+@layer base {
+  input,
+  textarea,
+  select {
+    outline: none;
+  }
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+    box-shadow: none;
+  }
+}

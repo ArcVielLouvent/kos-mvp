@@ -227,14 +227,14 @@ def get_generation_model() -> str:
     return "gemini-3.5-flash"
 
 
-EMBEDDING_FALLBACK_MODELS = ["gemini-embedding-2", "gemini-embedding-001"]
+EMBEDDING_FALLBACK_MODELS = ["gemini-embedding-001", "gemini-embedding-2"]
 
 
 def embed_text(text: str) -> list:
     """
     Sintaks ekstraksi array embedding dengan pembatasan dimensi ke 768.
-    Kalau model pertama kena kuota habis (429 RESOURCE_EXHAUSTED), otomatis
-    lompat ke model embedding berikutnya di EMBEDDING_FALLBACK_MODELS.
+    Fallback ke model embedding berikutnya kalau model saat ini kena kuota
+    habis (429) ATAU tidak bisa diakses (403/404) -- bukan cuma kuota.
     """
     client = get_client()
     last_error = None
@@ -248,12 +248,18 @@ def embed_text(text: str) -> list:
                 config=types.EmbedContentConfig(output_dimensionality=768),
             )
             [embedding_obj] = result.embeddings
+            print(f"[DEBUG-EMBED] Sukses pakai model '{model_name}'")
             return embedding_obj.values
         except Exception as e:
             last_error = e
             error_str = str(e)
-            if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
-                continue  # kuota model embedding ini habis -> coba model berikutnya
+            print(f"[DEBUG-EMBED] Gagal model '{model_name}': {error_str}")
+            is_model_unavailable = any(
+                code in error_str
+                for code in ["RESOURCE_EXHAUSTED", "429", "PERMISSION_DENIED", "403", "NOT_FOUND", "404"]
+            )
+            if is_model_unavailable:
+                continue
             raise
 
     raise last_error

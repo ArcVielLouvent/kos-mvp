@@ -85,13 +85,14 @@ export default function FileManagerPage() {
     try {
       const res = await apiFetch("/api/upload", { method: "POST", body: formData });
       const result = await res.json();
-      setActionMsg(result.message);
+      if (result.errors && result.errors.length > 0) {
+        setActionMsg(`${result.message}\n${result.errors.join("\n")}`);
+      } else {
+        setActionMsg(result.message);
+      }
       loadFiles();
     } catch {
       setActionMsg("Gagal memproses unggah berkas.");
-    } finally {
-      setIsProcessing(false);
-      e.target.value = "";
     }
   };
 
@@ -237,7 +238,7 @@ export default function FileManagerPage() {
         </div>
 
         {actionMsg && (
-          <div className="rounded bg-navy-50 p-3 text-xs font-medium text-navy-900 border border-navy-100 animate-fade-in">
+          <div className="rounded-[var(--radius-control)] border border-navy-100 bg-navy-50 px-4 py-2.5 text-xs font-medium text-navy-900 whitespace-pre-line">
             {actionMsg}
           </div>
         )}

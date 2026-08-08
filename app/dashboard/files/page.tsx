@@ -6,9 +6,7 @@ import { DocumentBadge } from "@/components/DocumentBadge";
 import { apiFetch, apiJson } from "@/lib/api";
 
 const PAGE_SIZE = 20;
-const API_URL = typeof window !== "undefined" && window.location.hostname === "localhost"
-  ? "http://localhost:8000"
-  : "";
+
 export default function FileManagerPage() {
   const [currentPath, setCurrentPath] = useState("/");
   const [data, setData] = useState<{ folders: any[]; files: any[]; total: number; writable: boolean }>({
@@ -33,30 +31,11 @@ export default function FileManagerPage() {
   const loadFiles = async () => {
     setIsLoading(true);
     try {
-      const storedUser = typeof window !== "undefined" ? localStorage.getItem("kos_user") : null;
-      let userEmail = "";
-
-      if (storedUser) {
-        const parsed = JSON.parse(storedUser);
-        userEmail = parsed.email || "";
-      }
-
-      // TAMBAHKAN encodeURIComponent pada currentPath agar spasi aman terenkripsi di internet
-      const res = await fetch(`${API_URL}/api/files?path=${encodeURIComponent(currentPath)}&page=${page}&page_size=${PAGE_SIZE}&user_id=${encodeURIComponent(userEmail)}`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-cache"
-        }
-      });
-
-      if (!res.ok) {
-        // Jika backend melempar 400/404 hasil raise HTTPException, tangkap pesannya di sini
-        const errData = await res.json();
-        throw new Error(errData.detail || "Gagal mengambil data dari server cloud.");
-      }
-
-      const result = await res.json();
+      // apiJson otomatis menyisipkan header X-User-Email -- samain dengan
+      // semua endpoint lain, jangan kirim user_id lewat query param lagi.
+      const result = await apiJson(
+        `/api/files?path=${encodeURIComponent(currentPath)}&page=${page}&page_size=${PAGE_SIZE}`
+      );
       setData(result);
       setActionMsg("");
     } catch (e: any) {
@@ -65,7 +44,6 @@ export default function FileManagerPage() {
       setIsLoading(false);
     }
   };
-
 
   useEffect(() => {
     loadFiles();
@@ -264,7 +242,6 @@ export default function FileManagerPage() {
           </div>
         )}
 
-        {/* 1. BARIS OPERASI MASSAL (BULK DELETE) */}
         {data.writable && totalSelected > 0 && (
           <div className="flex items-center justify-between gap-4 rounded-[var(--radius-card)] border border-red-100 bg-red-50 p-3 shadow-2xs animate-fade-in">
             <span className="text-xs font-semibold text-red-700">{totalSelected} item terpilih untuk dihapus</span>
@@ -277,46 +254,15 @@ export default function FileManagerPage() {
           </div>
         )}
 
-        {/* 2. AREA TAMPILAN UTAMA DIREKTORI & FILE */}
         {isLoading ? (
           <p className="animate-pulse text-sm text-ink-muted">Menyinkronkan data cloud...</p>
         ) : (
           <div className="space-y-4">
-
-            {/* AREA A: DAFTAR FOLDER */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {data.folders?.map((f: any) => (
                 <div
                   key={f.path}
-                  // PERBAIKAN TOTAL: Saat kotak diklik, ubah state DAN langsung paksa fetch data path baru saat itu juga!
-                  onClick={async () => {
-                    setCurrentPath(f.path);
-                    setIsLoading(true);
-                    try {
-                      const storedUser = typeof window !== "undefined" ? localStorage.getItem("kos_user") : null;
-                      let userEmail = "";
-                      if (storedUser) {
-                        const parsed = JSON.parse(storedUser);
-                        userEmail = parsed.email || "";
-                      }
-                      // Panggil langsung ke server Vercel menggunakan path folder yang baru saja diklik
-                      const res = await fetch(`${API_URL}/api/files?path=${encodeURIComponent(f.path)}&page=1&page_size=${PAGE_SIZE}&user_id=${encodeURIComponent(userEmail)}`, {
-                        method: "GET",
-                        headers: {
-                          "Content-Type": "application/json",
-                          "Cache-Control": "no-cache"
-                        }
-                      });
-                      if (res.ok) {
-                        const result = await res.json();
-                        setData(result);
-                      }
-                    } catch (e) {
-                      console.error("Gagal menavigasi folder:", e);
-                    } finally {
-                      setIsLoading(false);
-                    }
-                  }}
+                  onClick={() => setCurrentPath(f.path)}
                   className="group flex items-center justify-between rounded-[var(--radius-card)] border border-navy-100 bg-white p-3 hover:bg-navy-50 shadow-sm transition-all cursor-pointer"
                 >
                   <div className="flex items-center gap-2 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
@@ -348,8 +294,6 @@ export default function FileManagerPage() {
               ))}
             </div>
 
-
-            {/* AREA B: DAFTAR BERKAS FILE */}
             <div className="overflow-hidden rounded-[var(--radius-card)] border border-navy-100 bg-white shadow-xs">
               {data.files?.length === 0 ? (
                 <p className="p-8 text-xs text-ink-faint text-center">Folder ini kosong atau belum memiliki dokumen.</p>
@@ -365,12 +309,11 @@ export default function FileManagerPage() {
                           className="rounded border-navy-300 accent-navy-900 cursor-pointer h-3.5 w-3.5"
                         />
                       )}
-                      <DocumentBadge type={f.metadata?.tipe_file || "pdf"} size="sm" />
+                      <DocumentBadge type={f.metadata?.tipe_file || "default"} size="sm" />
                       <span className="text-xs font-medium text-ink truncate max-w-md">{f.title}</span>
                       <span className="text-2xs text-ink-faint font-mono hidden sm:inline-block">{(f.created_at || "").slice(0, 10)}</span>
                     </div>
 
-                    {/* Aksi Berkas: Unduh File Asli & Manajemen Lokasi Cloud */}
                     <div className="flex items-center gap-2">
                       {f.file_url && (
                         <a
@@ -394,7 +337,6 @@ export default function FileManagerPage() {
               )}
             </div>
 
-            {/* AREA C: NAVIGASI HALAMAN (PAGINATION) */}
             {totalPages > 1 && (
               <div className="flex items-center justify-center gap-4 pt-2">
                 <button

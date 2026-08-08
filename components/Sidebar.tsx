@@ -13,11 +13,13 @@ export function Sidebar({ role, userEmail, companyName }: { role: string; userEm
     router.push("/auth");
   };
 
+  const isAdminTier = role === "Admin" || role === "SuperAdmin";
+
   const navItems = [
-    { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+    ...(isAdminTier ? [{ name: "Dashboard", href: "/dashboard", icon: LayoutDashboard }] : []),
     { name: "Chat KOS", href: "/dashboard/chat", icon: MessageSquare },
     { name: "File Manager", href: "/dashboard/files", icon: FolderTree },
-    { name: "Manajemen Tim", href: "/dashboard/team", icon: Users },
+    ...(isAdminTier ? [{ name: "Manajemen Tim", href: "/dashboard/team", icon: Users }] : []),
   ];
 
   return (
@@ -41,7 +43,7 @@ export function Sidebar({ role, userEmail, companyName }: { role: string; userEm
           );
         })}
 
-        {role === "Admin" || role === "SuperAdmin" ? (
+        {isAdminTier ? (
           <>
             <div className="mb-4 mt-6 px-3 text-xs font-semibold uppercase tracking-wider text-ink-faint">Admin Panel</div>
             <Link href="/dashboard/settings" className={cn("group flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2 text-sm font-medium transition-colors", pathname === "/dashboard/settings" ? "bg-navy-50 text-navy-900" : "text-ink-muted hover:bg-navy-50 hover:text-ink")}>

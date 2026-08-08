@@ -3,33 +3,30 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
+import { getStoredUser, KosUser } from "@/lib/api";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
     const router = useRouter();
-    const [user, setUser] = useState<{ role: string; email: string; company_id: string } | null>(null);
+    const [user, setUser] = useState<KosUser | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        // Ambil data user asli yang disimpan saat sukses login kemarin
-        const savedUser = localStorage.getItem("kos_user");
+        const savedUser = getStoredUser();
 
         if (!savedUser) {
-            // Jika tidak ada data login, paksa tendang ke halaman auth
             router.push("/auth");
             return;
         }
 
-        try {
-            setUser(JSON.parse(savedUser));
-        } catch (e) {
-            localStorage.removeItem("kos_user");
-            router.push("/auth");
-        } finally {
-            setIsLoading(false);
+        if (savedUser.must_change_password) {
+            router.push("/force-password-change");
+            return;
         }
+
+        setUser(savedUser);
+        setIsLoading(false);
     }, [router]);
 
-    // Tampilkan loading screen sementara sistem memeriksa status login
     if (isLoading) {
         return (
             <div className="flex h-screen w-full items-center justify-center bg-navy-50">
@@ -40,14 +37,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     return (
         <div className="flex h-screen w-full bg-navy-50 overflow-hidden text-ink">
-            {/* Sidebar menggunakan data USER ASLI hasil login */}
             <Sidebar
                 role={user?.role || "Karyawan"}
                 userEmail={user?.email || "user@perusahaan.com"}
-                companyName="Workspace Perusahaan" // Anda bisa menambahkan field company_name di objek user API jika diperlukan
+                companyName={user?.company_name || "Workspace Perusahaan"}
             />
 
-            {/* Area Konten Utama */}
             <main className="flex-1 overflow-y-auto bg-[#fafafa]">
                 {children}
             </main>

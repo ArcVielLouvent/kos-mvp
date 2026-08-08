@@ -1,7 +1,8 @@
 "use client";
-import { useState, useEffect } from "react";
-import { UserPlus, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { UserPlus } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
+import { FolderTreePicker } from "@/components/FolderTreePicker";
 import { apiJson } from "@/lib/api";
 
 export default function TeamPage() {
@@ -10,33 +11,17 @@ export default function TeamPage() {
   const [positionTitle, setPositionTitle] = useState("");
   const [msg, setMsg] = useState("");
   const [isSuccess, setIsSuccess] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [tempPasswords, setTempPasswords] = useState<Record<string, string> | null>(null);
 
-  // State baru untuk menampung daftar folder dinamis dari database
-  const [availableFolders, setAvailableFolders] = useState<string[]>(["/"]);
-  const [isLoadingFolders, setIsLoadingFolders] = useState(true);
-
-  // Ambil daftar folder asli dari backend secara otomatis saat halaman dibuka
-  useEffect(() => {
-    const fetchFolders = async () => {
-      try {
-        // Memanggil endpoint pembaca root folder (/) untuk melihat subfolder yang tersedia
-        const result = await apiJson("/api/folders/children?path=/");
-        if (result && result.children) {
-          const folderPaths = result.children.map((c: any) => c.path);
-          // Gabungkan root (/) dengan folder anak yang ditemukan di cloud
-          setAvailableFolders(["/", ...folderPaths]);
-        }
-      } catch (e) {
-        console.error("Gagal memuat daftar folder otomatis:", e);
-      } finally {
-        setIsLoadingFolders(false);
-      }
-    };
-    fetchFolders();
-  }, []);
-
   const submit = async () => {
+    if (!emails.trim()) {
+      setIsSuccess(false);
+      setMsg("Masukkan minimal satu email.");
+      return;
+    }
+
+    setIsLoading(true);
     setMsg("Menyimpan...");
     setTempPasswords(null);
 
@@ -54,46 +39,55 @@ export default function TeamPage() {
     } catch (err: any) {
       setIsSuccess(false);
       setMsg(err.message || "Gagal terhubung dengan server.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
     <div>
-      <TopBar title="Manajemen Tim" description="Tambahkan karyawan baru." />
-      <div className="p-8">
-        <div className="max-w-lg space-y-4 rounded-[var(--radius-card)] border border-navy-100 bg-white p-6">
-          <textarea
-            value={emails}
-            onChange={(e) => setEmails(e.target.value)}
-            rows={4}
-            placeholder="Masukkan email karyawan (pisahkan dengan baris baru untuk mendaftarkan massal)..."
-            className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:border-navy-500"
-          />
-          <input
-            type="text"
-            value={positionTitle}
-            onChange={(e) => setPositionTitle(e.target.value)}
-            placeholder="Jabatan (opsional, berlaku untuk semua email di atas)"
-            className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:border-navy-500"
-          />
+      <TopBar title="Manajemen Tim" description="Tambahkan karyawan baru dan atur akses folder mereka." />
+      <div className="grid grid-cols-1 gap-6 p-8 lg:grid-cols-2">
+        {/* Kolom kiri: form pendaftaran */}
+        <div className="space-y-4 rounded-[var(--radius-card)] border border-navy-100 bg-white p-6">
+          <h3 className="text-sm font-semibold text-ink">Daftarkan Karyawan</h3>
 
-          {/* MENGUBAH SELECT MENJADI DINAMIS BERDASARKAN ISI SUPABASE */}
-          <div className="space-y-1">
-            <label className="text-2xs font-semibold text-ink-muted">Pilih Hak Akses Direktori Folder</label>
-            <select
-              value={folder}
-              onChange={(e) => setFolder(e.target.value)}
-              disabled={isLoadingFolders}
-              className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:border-navy-500 bg-white disabled:opacity-50"
-            >
-              {availableFolders.map((pathStr) => (
-                <option key={pathStr} value={pathStr}>{pathStr}</option>
-              ))}
-            </select>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-ink-muted">Daftar Email</label>
+            <textarea
+              value={emails}
+              onChange={(e) => setEmails(e.target.value)}
+              rows={5}
+              placeholder="Satu email per baris untuk daftar massal..."
+              className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:border-navy-500"
+            />
           </div>
 
-          <button onClick={submit} className="flex gap-2 rounded bg-navy-900 px-4 py-2 text-sm font-medium text-white hover:bg-navy-800">
-            <UserPlus className="h-4 w-4" /> Daftarkan
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-ink-muted">Jabatan (opsional)</label>
+            <input
+              type="text"
+              value={positionTitle}
+              onChange={(e) => setPositionTitle(e.target.value)}
+              placeholder="Berlaku untuk semua email di atas"
+              className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:border-navy-500"
+            />
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-semibold text-ink-muted">Folder Akses Terpilih</p>
+            <div className="rounded border border-navy-100 bg-navy-50 px-3 py-2 font-mono-data text-sm text-navy-900">
+              {folder}
+            </div>
+            <p className="mt-1 text-2xs text-ink-faint">Pilih folder tujuan lewat panel di sebelah kanan.</p>
+          </div>
+
+          <button
+            onClick={submit}
+            disabled={isLoading}
+            className="flex items-center gap-2 rounded bg-navy-900 px-4 py-2 text-sm font-medium text-white hover:bg-navy-800 disabled:opacity-50"
+          >
+            <UserPlus className="h-4 w-4" /> {isLoading ? "Mendaftarkan..." : "Daftarkan"}
           </button>
 
           {msg && (
@@ -101,7 +95,7 @@ export default function TeamPage() {
           )}
 
           {tempPasswords && Object.keys(tempPasswords).length > 0 && (
-            <div className="overflow-hidden rounded border border-navy-100 mt-4">
+            <div className="mt-4 overflow-hidden rounded border border-navy-100">
               <table className="w-full text-xs">
                 <thead className="bg-navy-50">
                   <tr>
@@ -120,6 +114,15 @@ export default function TeamPage() {
               </table>
             </div>
           )}
+        </div>
+
+        {/* Kolom kanan: folder tree picker */}
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-ink">Pilih Folder Akses</h3>
+          <p className="text-xs text-ink-faint">
+            Karyawan yang didaftarkan hanya bisa melihat dokumen di dalam folder ini (dan sub-foldernya).
+          </p>
+          <FolderTreePicker value={folder} onChange={setFolder} />
         </div>
       </div>
     </div>

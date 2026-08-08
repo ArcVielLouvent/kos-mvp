@@ -13,12 +13,14 @@ import { cn } from "@/lib/utils";
 const TYPE_CONFIG = {
     "Dokumen PDF": { icon: FileText, bg: "bg-red-50", fg: "text-red-600", label: "PDF" },
     "Dokumen Word": { icon: FileText, bg: "bg-blue-50", fg: "text-blue-600", label: "Word" },
+    "Dokumen RTF": { icon: FileText, bg: "bg-blue-50", fg: "text-blue-600", label: "RTF" },
     "Spreadsheet": { icon: FileSpreadsheet, bg: "bg-green-50", fg: "text-green-600", label: "Excel" },
+    "CSV Data": { icon: FileSpreadsheet, bg: "bg-green-50", fg: "text-green-600", label: "CSV" },
     "Presentasi": { icon: Presentation, bg: "bg-orange-50", fg: "text-orange-600", label: "Slide" },
-    "Media Gambar": { icon: ImageIcon, bg: "bg-purple-50", fg: "text-purple-600", label: "Gambar" },
-    "Media Video": { icon: Video, bg: "bg-pink-50", fg: "text-pink-600", label: "Video" },
-    "Media Audio": { icon: FileAudio, bg: "bg-amber-50", fg: "text-amber-600", label: "Audio" },
+    "Gambar": { icon: ImageIcon, bg: "bg-purple-50", fg: "text-purple-600", label: "Gambar" },
+    "Media Transkrip": { icon: Video, bg: "bg-pink-50", fg: "text-pink-600", label: "Media" },
     "Video YouTube": { icon: SquarePlay, bg: "bg-red-50", fg: "text-red-600", label: "YouTube" },
+    "Teks": { icon: File, bg: "bg-gray-100", fg: "text-gray-600", label: "Teks" },
     "default": { icon: File, bg: "bg-gray-100", fg: "text-gray-600", label: "File" },
 };
 

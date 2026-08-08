@@ -349,6 +349,18 @@ def list_documents_in_folder(
     )
     return r.data, (r.count or 0)
 
+def count_all_documents(company_id: str) -> int:
+    """Total dokumen di SELURUH folder milik company -- dipakai Dashboard.
+    Beda dengan list_documents_in_folder yang sengaja cuma hitung 1 folder
+    spesifik (buat kebutuhan navigasi File Manager)."""
+    client = get_client()
+    r = (
+        client.table("documents")
+        .select("id", count="exact")
+        .eq("company_id", company_id)
+        .execute()
+    )
+    return r.count or 0
 
 # ---------- CHAT HISTORY ----------
 def create_chat_session(user_email: str, company_id: str) -> str:

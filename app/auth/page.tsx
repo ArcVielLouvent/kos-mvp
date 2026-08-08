@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, Mail, Lock, LogIn, UserPlus } from "lucide-react";
+import { API_URL } from "@/lib/api";
 
 export default function AuthPage() {
   const router = useRouter();
@@ -19,7 +20,7 @@ export default function AuthPage() {
     setError(""); setMsg(""); setIsLoading(true);
 
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch(`${API_URL}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password })
@@ -28,8 +29,15 @@ export default function AuthPage() {
 
       if (res.ok) {
         localStorage.setItem("kos_user", JSON.stringify(data.user));
-        alert("Login berhasil! Mengalihkan ke Dashboard...");
-        router.push("/dashboard");
+
+        const role = data.user?.role;
+        const target = data.user?.must_change_password
+          ? "/force-password-change"
+          : role === "SuperAdmin" || role === "Admin"
+            ? "/dashboard"
+            : "/dashboard/chat";
+
+        router.push(target);
       } else {
         const errMsg = data.detail || "Email atau password salah.";
         setError(errMsg);
@@ -48,7 +56,7 @@ export default function AuthPage() {
     setError(""); setMsg(""); setIsLoading(true);
 
     try {
-      const res = await fetch("/api/auth/register", {
+      const res = await fetch(`${API_URL}/api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ company_name: company, admin_email: email, password })

@@ -850,25 +850,28 @@ async def list_users_endpoint(user: dict = Depends(get_current_user_context)):
         user["company_id"], user["folder_access"], user["role"])
     return {"users": users_list}
 
+
 def require_team_view(viewer: dict, target_email: str):
     if not is_admin_tier(viewer):
         raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
     if viewer["role"] != "SuperAdmin":
         target = db.get_user(target_email)
         if not target or not target.get("folder_access", "").startswith(viewer["folder_access"]):
-            raise HTTPException(status_code=403, detail="Di luar cakupan folder Anda.")
+            raise HTTPException(
+                status_code=403, detail="Di luar cakupan folder Anda.")
+
 
 @app.get("/api/team/users/{email}/chat-sessions")
 async def user_chat_sessions_endpoint(
     email: str, user: dict = Depends(get_current_user_context)
 ):
-    require_team_view(user, email) 
+    require_team_view(user, email)
     return {"sessions": db.list_chat_sessions(email)}
 
 
 @app.get("/api/team/users/{email}/reports")
 async def user_reports_endpoint(email: str, user: dict = Depends(get_current_user_context)):
-    require_team_view(user, email
+    require_team_view(user, email)
     return {"reports": db.get_user_reports(email)}
 
 
@@ -876,7 +879,7 @@ async def user_reports_endpoint(email: str, user: dict = Depends(get_current_use
 async def user_quiz_attempts_endpoint(
     email: str, user: dict = Depends(get_current_user_context)
 ):
-    require_team_view(user, email
+    require_team_view(user, email)
     return {"attempts": db.get_user_quiz_attempts(email)}
 
 
@@ -998,17 +1001,32 @@ async def generate_quiz_endpoint(
     return {"status": "success", "quiz_id": quiz_id, "questions": questions}
 
 
+class PasswordChangeRequest(BaseModel):
+    new_password: str
+
+
+@app.post("/api/profile/password")
+async def change_password_endpoint(
+    req: PasswordChangeRequest, user: dict = Depends(get_current_user_context)
+):
+    if not req.new_password or len(req.new_password) < 6:
+        raise HTTPException(
+            status_code=400, detail="Password minimal 6 karakter.")
+    db.update_password(user["email"], req.new_password)
+    return {"status": "success", "message": "Password berhasil diperbarui."}
+
 # ====================================================================
 # DASHBOARD
 # ====================================================================
+
+
 @app.get("/api/dashboard")
 async def dashboard_endpoint(user: dict = Depends(get_current_user_context)):
     if not is_admin_tier(user):             # <-- tambahkan baris ini
         raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
     try:
         company_id = user["company_id"]
-        _, doc_count = db.list_documents_in_folder(
-            company_id, "/", page_size=1)
+        doc_count = db.count_all_documents(company_id)
         users = db.list_managed_users(company_id, "/", "SuperAdmin")
         folders = db.get_unique_folders(company_id)
         return {

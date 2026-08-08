@@ -1,11 +1,20 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Folder, Home, Download, Upload, Loader2, Plus, Video, Trash2, Pencil, Move, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Folder, Home, Download, Upload, Plus, Video, Trash2, Pencil, Move,
+  ChevronLeft, ChevronRight, ArrowLeft, ChevronRight as Chevron, FolderOpen,
+} from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { DocumentBadge } from "@/components/DocumentBadge";
 import { apiFetch, apiJson } from "@/lib/api";
 
 const PAGE_SIZE = 20;
+
+function parentOf(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 1) return "/";
+  return "/" + parts.slice(0, -1).join("/") + "/";
+}
 
 export default function FileManagerPage() {
   const [currentPath, setCurrentPath] = useState("/");
@@ -21,21 +30,21 @@ export default function FileManagerPage() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [folderName, setFolderName] = useState("");
+  const [showNewFolder, setShowNewFolder] = useState(false);
   const [ytTitle, setYtTitle] = useState("");
   const [ytUrl, setYtUrl] = useState("");
   const [ytDesc, setYtDesc] = useState("");
+  const [showYoutube, setShowYoutube] = useState(false);
 
   const [selectedFolders, setSelectedFolders] = useState<Set<string>>(new Set());
   const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set());
 
   const loadFiles = async () => {
     setIsLoading(true);
-    console.log("[DEBUG] fetch path:", currentPath, "page:", page); // <-- tambahkan
     try {
       const result = await apiJson(
         `/api/files?path=${encodeURIComponent(currentPath)}&page=${page}&page_size=${PAGE_SIZE}`
       );
-      console.log("[DEBUG] response:", result); // <-- tambahkan
       setData(result);
       setActionMsg("");
     } catch (e: any) {
@@ -65,6 +74,7 @@ export default function FileManagerPage() {
       });
       setActionMsg(result.message);
       setFolderName("");
+      setShowNewFolder(false);
       loadFiles();
     } catch (e: any) {
       setActionMsg(e.message || "Gagal membuat folder.");
@@ -109,6 +119,7 @@ export default function FileManagerPage() {
       setYtTitle("");
       setYtUrl("");
       setYtDesc("");
+      setShowYoutube(false);
       loadFiles();
     } catch (e: any) {
       setActionMsg(e.message || "Gagal memproses video YouTube.");
@@ -205,37 +216,130 @@ export default function FileManagerPage() {
 
   const totalSelected = selectedFolders.size + selectedDocs.size;
   const totalPages = Math.max(1, Math.ceil((data.total || 0) / PAGE_SIZE));
+  const crumbs = currentPath.split("/").filter(Boolean);
 
   return (
     <div>
       <TopBar title="File Manager" description="Kelola dokumen & pangkalan data AI perusahaan." />
-      <div className="p-8 space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <button onClick={() => setCurrentPath("/")} className="flex items-center gap-1.5 rounded-[var(--radius-control)] bg-navy-900 px-3 py-2 font-medium text-white text-xs">
-            <Home className="h-4 w-4" /> Root Drive
+      <div className="p-8 space-y-5">
+        {/* Toolbar navigasi: back + breadcrumb + current path */}
+        <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius-card)] border border-navy-100 bg-white px-4 py-3 shadow-2xs">
+          <button
+            onClick={() => setCurrentPath(parentOf(currentPath))}
+            disabled={currentPath === "/"}
+            title="Kembali ke folder sebelumnya"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-ink-muted hover:bg-navy-50 disabled:opacity-30 disabled:hover:bg-transparent"
+          >
+            <ArrowLeft className="h-4 w-4" />
           </button>
 
-          {data.writable && (
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 rounded border p-1 bg-white">
-                <input type="text" placeholder="Nama folder..." value={folderName} onChange={(e) => setFolderName(e.target.value)} className="px-2 py-1 text-xs focus:outline-none w-28" />
-                <button onClick={handleCreateFolder} className="p-1.5 bg-navy-50 rounded hover:bg-navy-100"><Plus className="h-3.5 w-3.5 text-navy-900" /></button>
-              </div>
+          <div className="h-5 w-px bg-navy-100" />
 
-              <div className="flex items-center gap-1.5 rounded border p-1 bg-white">
-                <input type="text" placeholder="Judul Video..." value={ytTitle} onChange={(e) => setYtTitle(e.target.value)} className="px-2 py-1 text-xs focus:outline-none w-24" />
-                <input type="text" placeholder="Link YT..." value={ytUrl} onChange={(e) => setYtUrl(e.target.value)} className="px-2 py-1 text-xs focus:outline-none w-24" />
-                <button onClick={handleAddYouTube} className="p-1.5 bg-navy-50 rounded hover:bg-navy-100"><Video className="h-3.5 w-3.5 text-navy-900" /></button>
-              </div>
+          <button
+            onClick={() => setCurrentPath("/")}
+            className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-navy-900 hover:bg-navy-50"
+          >
+            <Home className="h-3.5 w-3.5" /> Drive
+          </button>
 
-              <label className="flex items-center gap-1.5 rounded bg-navy-900 px-3 py-2 font-medium text-white cursor-pointer hover:bg-navy-800 text-xs">
-                <Upload className="h-3.5 w-3.5" />
-                <span>Unggah Berkas</span>
-                <input type="file" multiple onChange={handleFileUpload} disabled={isProcessing} className="hidden" />
-              </label>
-            </div>
-          )}
+          {crumbs.map((part, i) => {
+            const accum = "/" + crumbs.slice(0, i + 1).join("/") + "/";
+            const isLast = i === crumbs.length - 1;
+            return (
+              <div key={accum} className="flex items-center gap-2">
+                <Chevron className="h-3.5 w-3.5 text-ink-faint" />
+                <button
+                  onClick={() => setCurrentPath(accum)}
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium hover:bg-navy-50 ${isLast ? "text-navy-900 font-semibold" : "text-ink-muted"
+                    }`}
+                >
+                  {part}
+                </button>
+              </div>
+            );
+          })}
+
+          <span className="ml-auto flex items-center gap-1.5 rounded-full bg-navy-50 px-3 py-1 font-mono-data text-2xs text-ink-muted">
+            <FolderOpen className="h-3 w-3" /> {currentPath}
+          </span>
         </div>
+
+        {/* Aksi: new folder / youtube / upload */}
+        {data.writable && (
+          <div className="flex flex-wrap items-center gap-2">
+            {showNewFolder ? (
+              <div className="flex items-center gap-1.5 rounded-[var(--radius-control)] border border-navy-200 bg-white px-1 py-1 shadow-2xs">
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Nama folder baru..."
+                  value={folderName}
+                  onChange={(e) => setFolderName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleCreateFolder();
+                    if (e.key === "Escape") { setShowNewFolder(false); setFolderName(""); }
+                  }}
+                  className="px-2 py-1.5 text-xs focus:outline-none w-40"
+                />
+                <button onClick={handleCreateFolder} className="rounded bg-navy-900 px-3 py-1.5 text-2xs font-semibold text-white hover:bg-navy-800">
+                  Buat
+                </button>
+                <button
+                  onClick={() => { setShowNewFolder(false); setFolderName(""); }}
+                  className="px-2 py-1.5 text-2xs text-ink-faint hover:text-ink"
+                >
+                  Batal
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowNewFolder(true)}
+                className="flex items-center gap-1.5 rounded-[var(--radius-control)] border border-navy-100 bg-white px-3 py-2 text-xs font-medium text-ink hover:bg-navy-50"
+              >
+                <Plus className="h-3.5 w-3.5" /> Folder Baru
+              </button>
+            )}
+
+            {showYoutube ? (
+              <div className="flex items-center gap-1.5 rounded-[var(--radius-control)] border border-navy-200 bg-white px-1 py-1 shadow-2xs">
+                <input
+                  type="text" placeholder="Judul video..." value={ytTitle}
+                  onChange={(e) => setYtTitle(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddYouTube()}
+                  className="px-2 py-1.5 text-xs focus:outline-none w-28"
+                />
+                <input
+                  type="text" placeholder="Link YouTube..." value={ytUrl}
+                  onChange={(e) => setYtUrl(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddYouTube()}
+                  className="px-2 py-1.5 text-xs focus:outline-none w-32"
+                />
+                <button onClick={handleAddYouTube} className="rounded bg-navy-900 px-3 py-1.5 text-2xs font-semibold text-white hover:bg-navy-800">
+                  Tambah
+                </button>
+                <button
+                  onClick={() => { setShowYoutube(false); setYtTitle(""); setYtUrl(""); setYtDesc(""); }}
+                  className="px-2 py-1.5 text-2xs text-ink-faint hover:text-ink"
+                >
+                  Batal
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowYoutube(true)}
+                className="flex items-center gap-1.5 rounded-[var(--radius-control)] border border-navy-100 bg-white px-3 py-2 text-xs font-medium text-ink hover:bg-navy-50"
+              >
+                <Video className="h-3.5 w-3.5" /> Video YouTube
+              </button>
+            )}
+
+            <label className="ml-auto flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-control)] bg-navy-900 px-4 py-2 text-xs font-semibold text-white hover:bg-navy-800">
+              <Upload className="h-3.5 w-3.5" />
+              Unggah Berkas
+              <input type="file" multiple onChange={handleFileUpload} disabled={isProcessing} className="hidden" />
+            </label>
+          </div>
+        )}
 
         {actionMsg && (
           <div className="rounded-[var(--radius-control)] border border-navy-100 bg-navy-50 px-4 py-2.5 text-xs font-medium text-navy-900 whitespace-pre-line">
@@ -244,13 +348,13 @@ export default function FileManagerPage() {
         )}
 
         {data.writable && totalSelected > 0 && (
-          <div className="flex items-center justify-between gap-4 rounded-[var(--radius-card)] border border-red-100 bg-red-50 p-3 shadow-2xs animate-fade-in">
-            <span className="text-xs font-semibold text-red-700">{totalSelected} item terpilih untuk dihapus</span>
+          <div className="flex items-center justify-between gap-4 rounded-[var(--radius-card)] border border-red-100 bg-red-50 p-3">
+            <span className="text-xs font-semibold text-red-700">{totalSelected} item terpilih</span>
             <button
               onClick={handleBulkDelete}
-              className="flex items-center gap-1.5 rounded bg-red-600 px-3 py-1.5 text-2xs font-bold text-white hover:bg-red-700 shadow-sm"
+              className="flex items-center gap-1.5 rounded bg-red-600 px-3 py-1.5 text-2xs font-bold text-white hover:bg-red-700"
             >
-              <Trash2 className="h-3.5 w-3.5" /> Hapus Terpilih Secara Permanen
+              <Trash2 className="h-3.5 w-3.5" /> Hapus Terpilih
             </button>
           </div>
         )}
@@ -258,87 +362,104 @@ export default function FileManagerPage() {
         {isLoading ? (
           <p className="animate-pulse text-sm text-ink-muted">Menyinkronkan data cloud...</p>
         ) : (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {data.folders?.map((f: any) => (
-                <div
-                  key={f.path}
-                  onClick={() => {
-                    console.log("[DEBUG] folder diklik:", f.path);
-                    setCurrentPath(f.path);
-                  }}
-                  className="group flex items-center justify-between rounded-[var(--radius-card)] border border-navy-100 bg-white p-3 hover:bg-navy-50 shadow-sm transition-all cursor-pointer"
-                >
-                  {/* PENTING: stopPropagation cuma di checkbox itu sendiri,
-                      bukan di wrapper yang juga isinya nama folder --
-                      supaya klik nama folder tetap bubbling ke onClick di atas. */}
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    {data.writable && (
-                      <input
-                        type="checkbox"
-                        checked={selectedFolders.has(f.path)}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={() => toggleFolder(f.path)}
-                        className="rounded border-navy-300 accent-navy-900 cursor-pointer h-3.5 w-3.5 shrink-0"
-                      />
-                    )}
-
-                    <div className="flex items-center gap-2 text-left flex-1 min-w-0 select-none">
-                      <Folder className="h-4 w-4 text-navy-700 shrink-0 group-hover:text-navy-900" />
-                      <span className="text-xs font-medium text-ink truncate group-hover:underline">{f.name}</span>
-                    </div>
-                  </div>
-
-                  {data.writable && (
-                    <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => handleRenameFolder(f.path, f.name)} className="p-1 text-ink-muted hover:text-navy-900" title="Ubah Nama"><Pencil className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => handleDeleteFolder(f.path)} className="p-1 text-ink-muted hover:text-red-600" title="Hapus Folder"><Trash2 className="h-3.5 w-3.5" /></button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="overflow-hidden rounded-[var(--radius-card)] border border-navy-100 bg-white shadow-xs">
-              {data.files?.length === 0 ? (
-                <p className="p-8 text-xs text-ink-faint text-center">Folder ini kosong atau belum memiliki dokumen.</p>
-              ) : (
-                data.files?.map((f: any) => (
-                  <div key={f.id} className="group flex items-center justify-between border-b border-navy-100 px-4 py-2.5 hover:bg-navy-50 transition-all">
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className="space-y-5">
+            {data.folders.length > 0 && (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {data.folders.map((f: any) => (
+                  <div
+                    key={f.path}
+                    onClick={() => setCurrentPath(f.path)}
+                    className="group relative flex flex-col gap-3 rounded-[var(--radius-card)] border border-navy-100 bg-white p-4 shadow-2xs transition-all hover:-translate-y-0.5 hover:border-navy-300 hover:shadow-[var(--shadow-card)] cursor-pointer"
+                  >
+                    <div className="flex items-start justify-between">
+                      <span className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] bg-amber-50 text-amber-500">
+                        <Folder className="h-5 w-5" fill="currentColor" strokeWidth={1} />
+                      </span>
                       {data.writable && (
                         <input
                           type="checkbox"
-                          checked={selectedDocs.has(f.id)}
-                          onChange={() => toggleDoc(f.id)}
-                          className="rounded border-navy-300 accent-navy-900 cursor-pointer h-3.5 w-3.5"
+                          checked={selectedFolders.has(f.path)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => toggleFolder(f.path)}
+                          className="mt-1 h-3.5 w-3.5 rounded border-navy-300 accent-navy-900"
                         />
                       )}
-                      <DocumentBadge type={f.metadata?.tipe_file || "default"} size="sm" />
-                      <span className="text-xs font-medium text-ink truncate max-w-md">{f.title}</span>
-                      <span className="text-2xs text-ink-faint font-mono hidden sm:inline-block">{(f.created_at || "").slice(0, 10)}</span>
                     </div>
+                    <span className="truncate text-sm font-medium text-ink group-hover:text-navy-900">{f.name}</span>
 
-                    <div className="flex items-center gap-2">
-                      {f.file_url && (
-                        <a
-                          href={f.file_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded border border-navy-100 bg-white px-2.5 py-1 text-2xs font-semibold text-ink-muted hover:bg-navy-50 flex items-center gap-1 shadow-2xs transition-colors"
-                        >
-                          <Download className="h-3 w-3" /> Unduh
-                        </a>
-                      )}
-                      {data.writable && (
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => handleMoveDoc(f.id)} className="p-1 text-ink-muted hover:text-navy-700" title="Pindahkan Berkas"><Move className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => handleDeleteDoc(f.id)} className="p-1 text-ink-muted hover:text-red-600" title="Hapus Berkas"><Trash2 className="h-3.5 w-3.5" /></button>
-                        </div>
-                      )}
-                    </div>
+                    {data.writable && (
+                      <div
+                        className="absolute bottom-3 right-3 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button onClick={() => handleRenameFolder(f.path, f.name)} className="rounded bg-white p-1 text-ink-muted shadow-sm hover:text-navy-900" title="Ubah Nama">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={() => handleDeleteFolder(f.path)} className="rounded bg-white p-1 text-ink-muted shadow-sm hover:text-red-600" title="Hapus">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                ))
+                ))}
+              </div>
+            )}
+
+            <div className="overflow-hidden rounded-[var(--radius-card)] border border-navy-100 bg-white">
+              {data.files.length === 0 ? (
+                <p className="p-10 text-center text-xs text-ink-faint">Folder ini kosong atau belum memiliki dokumen.</p>
+              ) : (
+                <>
+                  <div className="hidden border-b border-navy-100 bg-navy-50/50 px-4 py-2 text-2xs font-semibold uppercase tracking-wide text-ink-faint sm:grid sm:grid-cols-[1fr_120px_140px]">
+                    <span>Nama</span>
+                    <span>Tanggal</span>
+                    <span className="text-right">Aksi</span>
+                  </div>
+                  {data.files.map((f: any) => (
+                    <div
+                      key={f.id}
+                      className="group flex items-center justify-between gap-3 border-b border-navy-50 px-4 py-3 last:border-0 hover:bg-navy-50/60 sm:grid sm:grid-cols-[1fr_120px_140px]"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        {data.writable && (
+                          <input
+                            type="checkbox"
+                            checked={selectedDocs.has(f.id)}
+                            onChange={() => toggleDoc(f.id)}
+                            className="h-3.5 w-3.5 shrink-0 rounded border-navy-300 accent-navy-900"
+                          />
+                        )}
+                        <DocumentBadge type={f.metadata?.tipe_file || "default"} size="sm" />
+                        <span className="truncate text-sm font-medium text-ink">{f.title}</span>
+                      </div>
+
+                      <span className="hidden text-xs text-ink-faint sm:block">{(f.created_at || "").slice(0, 10)}</span>
+
+                      <div className="flex items-center justify-end gap-1.5">
+                        {f.file_url && (
+                          <a
+                            href={f.file_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1 rounded border border-navy-100 bg-white px-2.5 py-1 text-2xs font-semibold text-ink-muted hover:bg-navy-50"
+                          >
+                            <Download className="h-3 w-3" /> Unduh
+                          </a>
+                        )}
+                        {data.writable && (
+                          <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                            <button onClick={() => handleMoveDoc(f.id)} className="p-1 text-ink-muted hover:text-navy-700" title="Pindahkan">
+                              <Move className="h-3.5 w-3.5" />
+                            </button>
+                            <button onClick={() => handleDeleteDoc(f.id)} className="p-1 text-ink-muted hover:text-red-600" title="Hapus">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </>
               )}
             </div>
 
@@ -347,7 +468,7 @@ export default function FileManagerPage() {
                 <button
                   disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium text-ink-muted bg-white disabled:opacity-40 hover:bg-navy-50 transition-all shadow-2xs"
+                  className="flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium text-ink-muted bg-white disabled:opacity-40 hover:bg-navy-50"
                 >
                   <ChevronLeft className="h-3.5 w-3.5" /> Sebelumnya
                 </button>
@@ -357,7 +478,7 @@ export default function FileManagerPage() {
                 <button
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  className="flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium text-ink-muted bg-white disabled:opacity-40 hover:bg-navy-50 transition-all shadow-2xs"
+                  className="flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium text-ink-muted bg-white disabled:opacity-40 hover:bg-navy-50"
                 >
                   Berikutnya <ChevronRight className="h-3.5 w-3.5" />
                 </button>

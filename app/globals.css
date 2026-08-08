@@ -53,6 +53,14 @@ h4 {
     outline-offset: 2px;
 }
 
+/* Kecualikan form input -- mereka udah punya indikator fokus sendiri
+   (border biru custom di tiap komponen), outline generic bikin dobel */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+    outline: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
 
     *,
@@ -61,18 +69,4 @@ h4 {
         animation-duration: 0.01ms !important;
         transition-duration: 0.01ms !important;
     }
-}
-
-@layer base {
-  input,
-  textarea,
-  select {
-    outline: none;
-  }
-  input:focus,
-  textarea:focus,
-  select:focus {
-    outline: none;
-    box-shadow: none;
-  }
 }

@@ -423,6 +423,17 @@ def delete_chat_session(session_id: str):
     client = get_client()
     client.table("chat_sessions").delete().eq("id", session_id).execute()
 
+def count_all_folders(company_id: str) -> int:
+    """Total folder company-wide dari tabel folders -- termasuk folder kosong,
+    beda dengan get_unique_folders yang cuma ngitung folder yang punya dokumen."""
+    client = get_client()
+    r = (
+        client.table("folders")
+        .select("path", count="exact")
+        .eq("company_id", company_id)
+        .execute()
+    )
+    return r.count or 0
 
 def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
     client = get_client()

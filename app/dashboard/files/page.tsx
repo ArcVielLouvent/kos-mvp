@@ -31,8 +31,6 @@ export default function FileManagerPage() {
   const loadFiles = async () => {
     setIsLoading(true);
     try {
-      // apiJson otomatis menyisipkan header X-User-Email -- samain dengan
-      // semua endpoint lain, jangan kirim user_id lewat query param lagi.
       const result = await apiJson(
         `/api/files?path=${encodeURIComponent(currentPath)}&page=${page}&page_size=${PAGE_SIZE}`
       );
@@ -265,15 +263,16 @@ export default function FileManagerPage() {
                   onClick={() => setCurrentPath(f.path)}
                   className="group flex items-center justify-between rounded-[var(--radius-card)] border border-navy-100 bg-white p-3 hover:bg-navy-50 shadow-sm transition-all cursor-pointer"
                 >
-                  <div className="flex items-center gap-2 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+                  {/* PENTING: stopPropagation cuma di checkbox itu sendiri,
+                      bukan di wrapper yang juga isinya nama folder --
+                      supaya klik nama folder tetap bubbling ke onClick di atas. */}
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
                     {data.writable && (
                       <input
                         type="checkbox"
                         checked={selectedFolders.has(f.path)}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          toggleFolder(f.path);
-                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleFolder(f.path)}
                         className="rounded border-navy-300 accent-navy-900 cursor-pointer h-3.5 w-3.5 shrink-0"
                       />
                     )}

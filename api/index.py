@@ -1028,14 +1028,13 @@ async def dashboard_endpoint(user: dict = Depends(get_current_user_context)):
         company_id = user["company_id"]
         doc_count = db.count_all_documents(company_id)
         users = db.list_managed_users(company_id, "/", "SuperAdmin")
-        folders = db.get_unique_folders(company_id)
+        folder_count = db.count_all_folders(company_id)
         return {
             "stats": [
                 {"label": "Total Dokumen", "value": doc_count},
                 {"label": "Total Karyawan", "value": len(
                     users) if users else 0},
-                {"label": "Total Folder", "value": len(
-                    folders) if folders else 0},
+                {"label": "Total Folder", "value": folder_count},
                 {"label": "Status Sistem", "value": "Aktif"},
             ],
             "recent": [],

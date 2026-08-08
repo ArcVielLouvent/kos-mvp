@@ -51,7 +51,7 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
             : {}),
         ...((options.headers as Record<string, string>) || {}),
     };
-    return fetch(`${API_URL}${path}`, { ...options, headers });
+    return fetch(`${API_URL}${path}`, { ...options, headers, cache: "no-store" });
 }
 
 export async function apiJson<T = any>(path: string, options: RequestInit = {}): Promise<T> {

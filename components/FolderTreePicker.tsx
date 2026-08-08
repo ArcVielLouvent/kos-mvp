@@ -21,12 +21,17 @@ export function FolderTreePicker({
     const [browsePath, setBrowsePath] = useState("/");
     const [children, setChildren] = useState<FolderChild[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState("");
 
     useEffect(() => {
         setIsLoading(true);
+        setError("");
         apiJson(`/api/folders/children?path=${encodeURIComponent(browsePath)}`)
             .then((res) => setChildren(res.children || []))
-            .catch(() => setChildren([]))
+            .catch((e: any) => {
+                setChildren([]);
+                setError(e.message || "Gagal memuat folder.");
+            })
             .finally(() => setIsLoading(false));
     }, [browsePath]);
 
@@ -60,6 +65,8 @@ export function FolderTreePicker({
             <div className="max-h-48 space-y-1 overflow-y-auto">
                 {isLoading ? (
                     <p className="text-xs text-ink-faint">Memuat folder...</p>
+                ) : error ? (
+                    <p className="text-xs text-red-600">{error}</p>
                 ) : children.length === 0 ? (
                     <p className="text-xs text-ink-faint">Tidak ada sub-folder di sini.</p>
                 ) : (

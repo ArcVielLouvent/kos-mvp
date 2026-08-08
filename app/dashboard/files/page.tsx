@@ -30,10 +30,12 @@ export default function FileManagerPage() {
 
   const loadFiles = async () => {
     setIsLoading(true);
+    console.log("[DEBUG] fetch path:", currentPath, "page:", page); // <-- tambahkan
     try {
       const result = await apiJson(
         `/api/files?path=${encodeURIComponent(currentPath)}&page=${page}&page_size=${PAGE_SIZE}`
       );
+      console.log("[DEBUG] response:", result); // <-- tambahkan
       setData(result);
       setActionMsg("");
     } catch (e: any) {
@@ -260,7 +262,10 @@ export default function FileManagerPage() {
               {data.folders?.map((f: any) => (
                 <div
                   key={f.path}
-                  onClick={() => setCurrentPath(f.path)}
+                  onClick={() => {
+                    console.log("[DEBUG] folder diklik:", f.path);
+                    setCurrentPath(f.path);
+                  }}
                   className="group flex items-center justify-between rounded-[var(--radius-card)] border border-navy-100 bg-white p-3 hover:bg-navy-50 shadow-sm transition-all cursor-pointer"
                 >
                   {/* PENTING: stopPropagation cuma di checkbox itu sendiri,

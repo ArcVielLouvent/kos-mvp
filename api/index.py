@@ -200,7 +200,7 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
     try:
         q_emb = ai.embed_text(question)
         docs = db.search_documents(
-            q_emb, company_id=company_id, match_count=3, folder_prefix=folder_access
+            q_emb, company_id=company_id, match_count=2, folder_prefix=folder_access
         )
         docs = ai.filter_docs_by_intent(question, docs)
 

@@ -272,7 +272,7 @@ def generate_answer(question: str, context_documents: list) -> str:
         sumber = doc.get("metadata", {}).get("tipe_file", "Dokumen KOS")
         folder = doc.get("folder_path", "/")
         context_parts.append(
-            f"Judul: {doc['title']}\nLokasi: {folder}\nTipe: {sumber}\nIsi:\n{doc['content']}"
+            f"Judul: {doc['title']}\nLokasi: {folder}\nTipe: {sumber}\nIsi:\n{doc['content'][:3000]}"
         )
 
     context = "\n\n====================\n\n".join(context_parts)

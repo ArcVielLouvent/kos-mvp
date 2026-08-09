@@ -7,6 +7,7 @@ import {
 import { TopBar } from "@/components/TopBar";
 import { DocumentBadge } from "@/components/DocumentBadge";
 import { apiFetch, apiJson } from "@/lib/api";
+import { useSearchParams } from "next/navigation";
 
 const PAGE_SIZE = 20;
 
@@ -17,7 +18,8 @@ function parentOf(path: string): string {
 }
 
 export default function FileManagerPage() {
-  const [currentPath, setCurrentPath] = useState("/");
+  const searchParams = useSearchParams();
+  const [currentPath, setCurrentPath] = useState(searchParams.get("path") || "/");
   const [data, setData] = useState<{ folders: any[]; files: any[]; total: number; writable: boolean }>({
     folders: [],
     files: [],
@@ -28,6 +30,7 @@ export default function FileManagerPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [uploadKey, setUploadKey] = useState(0);
 
   const [folderName, setFolderName] = useState("");
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -103,6 +106,9 @@ export default function FileManagerPage() {
       loadFiles();
     } catch {
       setActionMsg("Gagal memproses unggah berkas.");
+    } finally {
+      setIsProcessing(false);
+      setUploadKey((k) => k + 1);   // <-- tambahkan baris ini
     }
   };
 
@@ -336,7 +342,7 @@ export default function FileManagerPage() {
             <label className="ml-auto flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-control)] bg-navy-900 px-4 py-2 text-xs font-semibold text-white hover:bg-navy-800">
               <Upload className="h-3.5 w-3.5" />
               Unggah Berkas
-              <input type="file" multiple onChange={handleFileUpload} disabled={isProcessing} className="hidden" />
+              <input key={uploadKey} type="file" multiple onChange={handleFileUpload} disabled={isProcessing} className="hidden" />
             </label>
           </div>
         )}

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { ToastProvider } from "@/components/ToastProvider";
 
 export const metadata: Metadata = {
     title: "KOS — Knowledge Operating System",
@@ -11,7 +12,9 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
     return (
         <html lang="id">
-            <body className="antialiased">{children}</body>
+            <body className="antialiased">
+                <ToastProvider>{children}</ToastProvider>
+            </body>
         </html>
     );
 }

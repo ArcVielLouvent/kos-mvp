@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, Mail, Lock, LogIn, UserPlus } from "lucide-react";
 import { API_URL } from "@/lib/api";
+import { useToast } from "@/components/ToastProvider";
 
 export default function AuthPage() {
   const router = useRouter();
@@ -14,6 +15,7 @@ export default function AuthPage() {
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const { showToast } = useToast();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,6 +31,7 @@ export default function AuthPage() {
 
       if (res.ok) {
         localStorage.setItem("kos_user", JSON.stringify(data.user));
+        showToast("Login berhasil! Mengalihkan...", "success");
 
         const role = data.user?.role;
         const target = data.user?.must_change_password
@@ -37,15 +40,16 @@ export default function AuthPage() {
             ? "/dashboard"
             : "/dashboard/chat";
 
-        router.push(target);
+        setTimeout(() => router.push(target), 500);
       } else {
         const errMsg = data.detail || "Email atau password salah.";
         setError(errMsg);
-        alert("Gagal Login: " + errMsg);
+        showToast(errMsg, "error");
       }
     } catch (err: any) {
-      setError("Kesalahan jaringan, tidak dapat menghubungi backend.");
-      alert("Error Jaringan: Gagal menghubungi server API.");
+      const errMsg = "Kesalahan jaringan, tidak dapat menghubungi backend.";
+      setError(errMsg);
+      showToast(errMsg, "error");
     } finally {
       setIsLoading(false);
     }
@@ -65,17 +69,18 @@ export default function AuthPage() {
 
       if (res.ok) {
         setMsg(data.message || "Pendaftaran sukses. Silakan login.");
-        alert("Pendaftaran berhasil! Silakan Login.");
+        showToast("Pendaftaran berhasil! Silakan login.", "success");
         setView("login");
         setPassword("");
       } else {
         const errMsg = data.detail || "Gagal mendaftar.";
         setError(errMsg);
-        alert("Gagal Daftar: " + errMsg);
+        showToast(errMsg, "error");
       }
     } catch (err: any) {
-      setError("Kesalahan jaringan, tidak dapat menghubungi backend.");
-      alert("Error Jaringan: Gagal menghubungi server API.");
+      const errMsg = "Kesalahan jaringan, tidak dapat menghubungi backend.";
+      setError(errMsg);
+      showToast(errMsg, "error");
     } finally {
       setIsLoading(false);
     }

@@ -4,6 +4,8 @@ import { UserPlus } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { FolderTreePicker } from "@/components/FolderTreePicker";
 import { apiJson } from "@/lib/api";
+import { useToast } from "@/components/ToastProvider";
+import { Copy } from "lucide-react";
 
 export default function TeamPage() {
   const [emails, setEmails] = useState("");
@@ -13,6 +15,15 @@ export default function TeamPage() {
   const [isSuccess, setIsSuccess] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [tempPasswords, setTempPasswords] = useState<Record<string, string> | null>(null);
+  const { showToast } = useToast();
+
+  const copyAllAsTable = () => {
+    if (!tempPasswords) return;
+    const header = "Email\tPassword";
+    const rows = Object.entries(tempPasswords).map(([email, pw]) => `${email}\t${pw}`);
+    navigator.clipboard.writeText([header, ...rows].join("\n"));
+    showToast("Tabel disalin -- tinggal Ctrl+V ke Excel/Sheets.", "success");
+  };
 
   const submit = async () => {
     if (!emails.trim()) {
@@ -95,36 +106,45 @@ export default function TeamPage() {
           )}
 
           {tempPasswords && Object.keys(tempPasswords).length > 0 && (
-            <div className="mt-4 overflow-hidden rounded border border-navy-100">
-              <table className="w-full text-xs">
-                <thead className="bg-navy-50">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium text-ink-muted">Email</th>
-                    <th className="px-3 py-2 text-left font-medium text-ink-muted">Password sementara</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(tempPasswords).map(([email, pw]) => (
-                    <tr key={email} className="border-t border-navy-100">
-                      <td className="px-3 py-2">{email}</td>
-                      <td className="px-3 py-2 font-mono-data">{pw}</td>
+            <div className="mt-4">
+              <button
+                onClick={copyAllAsTable}
+                className="mb-2 flex items-center gap-1.5 rounded border border-navy-100 bg-white px-3 py-1.5 text-xs font-medium text-ink hover:bg-navy-50"
+              >
+                <Copy className="h-3.5 w-3.5" /> Salin Semua sebagai Tabel
+              </button>
+              <div className="overflow-hidden rounded border border-navy-100">
+                {/* table yang sudah ada, tidak berubah */}
+                <table className="w-full text-xs">
+                  <thead className="bg-navy-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-ink-muted">Email</th>
+                      <th className="px-3 py-2 text-left font-medium text-ink-muted">Password sementara</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {Object.entries(tempPasswords).map(([email, pw]) => (
+                      <tr key={email} className="border-t border-navy-100">
+                        <td className="px-3 py-2">{email}</td>
+                        <td className="px-3 py-2 font-mono-data">{pw}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
-        </div>
+            </div>
 
         {/* Kolom kanan: folder tree picker */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-ink">Pilih Folder Akses</h3>
-          <p className="text-xs text-ink-faint">
-            Karyawan yang didaftarkan hanya bisa melihat dokumen di dalam folder ini (dan sub-foldernya).
-          </p>
-          <FolderTreePicker value={folder} onChange={setFolder} />
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-ink">Pilih Folder Akses</h3>
+            <p className="text-xs text-ink-faint">
+              Karyawan yang didaftarkan hanya bisa melihat dokumen di dalam folder ini (dan sub-foldernya).
+            </p>
+            <FolderTreePicker value={folder} onChange={setFolder} />
+          </div>
         </div>
       </div>
-    </div>
-  );
+      );
 }

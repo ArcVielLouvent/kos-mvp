@@ -1038,15 +1038,29 @@ async def dashboard_endpoint(user: dict = Depends(get_current_user_context)):
         doc_count = db.count_all_documents(company_id)
         users = db.list_managed_users(company_id, "/", "SuperAdmin")
         folder_count = db.count_all_folders(company_id)
+        chat_count = db.count_all_chat_sessions(company_id)
+
+        root_folders = db.list_child_folders(company_id, "/")
+        folder_breakdown = []
+        for fpath in root_folders:
+            _, fdoc_count = db.list_documents_in_folder(company_id, fpath, page=1, page_size=1)
+            folder_breakdown.append({
+                "path": fpath,
+                "name": fpath.rstrip("/").split("/")[-1],
+                "count": fdoc_count,
+            })
+
+        recent = db.get_recent_activity(company_id, limit=8)
+
         return {
             "stats": [
                 {"label": "Total Dokumen", "value": doc_count},
-                {"label": "Total Karyawan", "value": len(
-                    users) if users else 0},
+                {"label": "Total Karyawan", "value": len(users) if users else 0},
                 {"label": "Total Folder", "value": folder_count},
-                {"label": "Status Sistem", "value": "Aktif"},
+                {"label": "Total Percakapan", "value": chat_count},
             ],
-            "recent": [],
+            "folderBreakdown": folder_breakdown,
+            "recent": recent,
         }
     except Exception:
         return {

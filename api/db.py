@@ -349,6 +349,7 @@ def list_documents_in_folder(
     )
     return r.data, (r.count or 0)
 
+
 def count_all_documents(company_id: str) -> int:
     """Total dokumen di SELURUH folder milik company -- dipakai Dashboard.
     Beda dengan list_documents_in_folder yang sengaja cuma hitung 1 folder
@@ -363,6 +364,8 @@ def count_all_documents(company_id: str) -> int:
     return r.count or 0
 
 # ---------- CHAT HISTORY ----------
+
+
 def create_chat_session(user_email: str, company_id: str) -> str:
     client = get_client()
     r = (
@@ -423,6 +426,7 @@ def delete_chat_session(session_id: str):
     client = get_client()
     client.table("chat_sessions").delete().eq("id", session_id).execute()
 
+
 def count_all_folders(company_id: str) -> int:
     """Total folder company-wide dari tabel folders -- termasuk folder kosong,
     beda dengan get_unique_folders yang cuma ngitung folder yang punya dokumen."""
@@ -434,6 +438,7 @@ def count_all_folders(company_id: str) -> int:
         .execute()
     )
     return r.count or 0
+
 
 def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
     client = get_client()
@@ -762,3 +767,73 @@ def get_full_document_content(document_id: str) -> str:
         .execute()
     )
     return "\n".join(c["content"] for c in r.data)
+
+
+def count_all_chat_sessions(company_id: str) -> int:
+    client = get_client()
+    r = (
+        client.table("chat_sessions")
+        .select("id", count="exact")
+        .eq("company_id", company_id)
+        .execute()
+    )
+    return r.count or 0
+
+
+def get_recent_activity(company_id: str, limit: int = 8) -> list:
+    """Gabungan aktivitas terbaru company-wide (dokumen diunggah, chat dimulai,
+    karyawan ditambahkan) -- dibaca dari created_at yang sudah ada di masing-masing
+    tabel, tanpa perlu tabel events terpisah."""
+    client = get_client()
+    activity = []
+
+    docs = (
+        client.table("documents")
+        .select("title, created_at")
+        .eq("company_id", company_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    for d in docs.data:
+        activity.append({
+            "type": "document",
+            "title": f"Dokumen diunggah: {d['title']}",
+            "who": "",
+            "time": d.get("created_at", ""),
+        })
+
+    sessions = (
+        client.table("chat_sessions")
+        .select("title, user_email, created_at")
+        .eq("company_id", company_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    for s in sessions.data:
+        activity.append({
+            "type": "chat",
+            "title": f"Percakapan baru: {s['title'] or 'Tanpa judul'}",
+            "who": s.get("user_email", ""),
+            "time": s.get("created_at", ""),
+        })
+
+    users = (
+        client.table("users")
+        .select("email, created_at")
+        .eq("company_id", company_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    for u in users.data:
+        activity.append({
+            "type": "employee",
+            "title": f"Anggota baru: {u['email']}",
+            "who": "",
+            "time": u.get("created_at", ""),
+        })
+
+    activity.sort(key=lambda a: a["time"] or "", reverse=True)
+    return activity[:limit]

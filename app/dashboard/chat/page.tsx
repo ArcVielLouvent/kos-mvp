@@ -1,6 +1,8 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { Plus, Send, Sparkles, Bot, Loader2, Download, AlertTriangle, ExternalLink, Copy, Check, Pencil, Trash2, X } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { DocumentBadge } from "@/components/DocumentBadge";
 import { cn } from "@/lib/utils";
 import { apiJson, downloadBase64, getStoredUser } from "@/lib/api";
@@ -123,6 +125,54 @@ function CopyButton({ text }: { text: string }) {
     );
 }
 
+/** Tabel hasil markdown AI dibungkus komponen ini supaya ada tombol
+ * "Salin Tabel" -- baca langsung dari DOM <table> yang sudah dirender,
+ * jadi hasil salinnya tab-separated dan rapi kalau ditempel ke Excel/Sheets. */
+function CopyableTable(props: React.TableHTMLAttributes<HTMLTableElement>) {
+    const tableRef = useRef<HTMLTableElement>(null);
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = () => {
+        const table = tableRef.current;
+        if (!table) return;
+        const rows = Array.from(table.rows).map((row) =>
+            Array.from(row.cells).map((cell) => (cell as HTMLElement).innerText.trim()).join("\t")
+        );
+        navigator.clipboard.writeText(rows.join("\n")).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+        });
+    };
+
+    return (
+        <div className="group/table relative my-2 max-w-full overflow-x-auto rounded-[var(--radius-control)] border border-navy-100">
+            <button
+                onClick={handleCopy}
+                className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded border border-navy-100 bg-white px-2 py-1 text-2xs font-medium text-ink-muted opacity-0 shadow-sm transition-opacity hover:bg-navy-50 group-hover/table:opacity-100"
+            >
+                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                {copied ? "Disalin" : "Salin Tabel"}
+            </button>
+            <table ref={tableRef} className="min-w-full text-xs" {...props} />
+        </div>
+    );
+}
+
+const markdownComponents = {
+    table: CopyableTable,
+    thead: (props: any) => <thead className="bg-navy-50" {...props} />,
+    th: (props: any) => <th className="border-b border-navy-100 px-2 py-1.5 text-left font-medium text-ink-muted" {...props} />,
+    td: (props: any) => <td className="border-b border-navy-50 px-2 py-1.5" {...props} />,
+    h1: (props: any) => <h3 className="mt-3 mb-1.5 text-base font-semibold text-ink" {...props} />,
+    h2: (props: any) => <h3 className="mt-3 mb-1.5 text-sm font-semibold text-ink" {...props} />,
+    h3: (props: any) => <h4 className="mt-2 mb-1 text-sm font-semibold text-ink" {...props} />,
+    p: (props: any) => <p className="mb-2 last:mb-0" {...props} />,
+    ul: (props: any) => <ul className="mb-2 list-disc space-y-0.5 pl-5" {...props} />,
+    ol: (props: any) => <ol className="mb-2 list-decimal space-y-0.5 pl-5" {...props} />,
+    strong: (props: any) => <strong className="font-semibold text-ink" {...props} />,
+    code: (props: any) => <code className="rounded bg-navy-50 px-1 py-0.5 font-mono-data text-2xs" {...props} />,
+};
+
 export default function ChatPage() {
     const user = getStoredUser();
     const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -197,7 +247,7 @@ export default function ChatPage() {
             });
             setSessions((prev) => prev.map((s) => (s.id === renamingId ? { ...s, title } : s)));
         } catch {
-            // gagal rename -- diamkan, list tetap seperti sebelumnya
+            // gagal rename -- diamkan
         } finally {
             setRenamingId(null);
         }
@@ -264,8 +314,6 @@ export default function ChatPage() {
 
     return (
         <div className="flex h-screen">
-            {/* Panel Riwayat -- sengaja dibedain dari Sidebar utama (bg soft, tanpa
-                border tebal/shadow) supaya gak kebaca kayak "sidebar kedua" */}
             <div className="flex w-64 shrink-0 flex-col border-r border-navy-100 bg-navy-50/50">
                 <div className="p-3">
                     <button
@@ -330,7 +378,6 @@ export default function ChatPage() {
                 </div>
             </div>
 
-            {/* Area Chat Utama */}
             <div className="flex flex-1 flex-col">
                 {messages.length === 0 ? (
                     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
@@ -370,9 +417,15 @@ export default function ChatPage() {
                                             </div>
                                         )}
 
-                                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">
-                                            {m.content}
-                                        </p>
+                                        {m.role === "assistant" ? (
+                                            <div className="text-sm leading-relaxed text-ink">
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                                    {m.content}
+                                                </ReactMarkdown>
+                                            </div>
+                                        ) : (
+                                            <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{m.content}</p>
+                                        )}
 
                                         {m.generatedFiles && m.generatedFiles.length > 0 && (
                                             <div className="mt-3 flex gap-2">
@@ -395,29 +448,25 @@ export default function ChatPage() {
                                         )}
 
                                         {m.analysisTable && (
-                                            <div className="mt-3 max-w-full overflow-x-auto rounded-[var(--radius-control)] border border-navy-100">
-                                                <table className="min-w-full text-xs">
-                                                    <thead className="bg-navy-50">
+                                            <div className="mt-3">
+                                                <CopyableTable>
+                                                    <thead>
                                                         <tr>
                                                             {m.analysisTable.columns.map((c) => (
-                                                                <th key={c} className="px-2 py-1.5 text-left font-medium text-ink-muted">
-                                                                    {c}
-                                                                </th>
+                                                                <th key={c}>{c}</th>
                                                             ))}
                                                         </tr>
                                                     </thead>
                                                     <tbody>
                                                         {m.analysisTable.rows.map((row, i) => (
-                                                            <tr key={i} className="border-t border-navy-100">
+                                                            <tr key={i}>
                                                                 {m.analysisTable!.columns.map((c) => (
-                                                                    <td key={c} className="px-2 py-1.5">
-                                                                        {String(row[c] ?? "")}
-                                                                    </td>
+                                                                    <td key={c}>{String(row[c] ?? "")}</td>
                                                                 ))}
                                                             </tr>
                                                         ))}
                                                     </tbody>
-                                                </table>
+                                                </CopyableTable>
                                             </div>
                                         )}
                                         {m.analysisFile && (

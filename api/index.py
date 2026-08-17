@@ -1029,9 +1029,21 @@ async def change_password_endpoint(
 # ====================================================================
 
 
+@app.get("/api/dashboard/chat-sessions")
+async def dashboard_chat_sessions_endpoint(
+    month: int = None,
+    year: int = None,
+    user: dict = Depends(get_current_user_context),
+):
+    if not is_admin_tier(user):
+        raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
+    sessions = db.list_all_chat_sessions_for_company(user["company_id"], month=month, year=year)
+    return {"sessions": sessions}
+
+
 @app.get("/api/dashboard")
 async def dashboard_endpoint(user: dict = Depends(get_current_user_context)):
-    if not is_admin_tier(user):             # <-- tambahkan baris ini
+    if not is_admin_tier(user):
         raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
     try:
         company_id = user["company_id"]

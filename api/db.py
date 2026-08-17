@@ -780,6 +780,37 @@ def count_all_chat_sessions(company_id: str) -> int:
     return r.count or 0
 
 
+def list_all_chat_sessions_for_company(company_id: str, month: int = None, year: int = None):
+    """Riwayat percakapan company-wide (semua user, bukan cuma yang login),
+    dipakai halaman Riwayat Percakapan di Dashboard. Bisa difilter bulan/tahun."""
+    client = get_client()
+    r = (
+        client.table("chat_sessions")
+        .select("*")
+        .eq("company_id", company_id)
+        .order("updated_at", desc=True)
+        .execute()
+    )
+    rows = r.data
+    if not month and not year:
+        return rows
+    filtered = []
+    for row in rows:
+        ts = row.get("created_at") or ""
+        if len(ts) < 7:
+            continue
+        try:
+            row_year, row_month = int(ts[0:4]), int(ts[5:7])
+        except ValueError:
+            continue
+        if year and row_year != year:
+            continue
+        if month and row_month != month:
+            continue
+        filtered.append(row)
+    return filtered
+
+
 def get_recent_activity(company_id: str, limit: int = 8) -> list:
     """Gabungan aktivitas terbaru company-wide (dokumen diunggah, chat dimulai,
     karyawan ditambahkan) -- dibaca dari created_at yang sudah ada di masing-masing

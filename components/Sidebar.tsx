@@ -32,7 +32,6 @@ export function Sidebar({ role, userEmail, companyName }: { role: string; userEm
   const navItems = [
     ...(isAdminTier ? [{ name: "Dashboard", href: "/dashboard", icon: LayoutDashboard }] : []),
     { name: "Chat KOS", href: "/dashboard/chat", icon: MessageSquare },
-    { name: "File Manager", href: "/dashboard/files", icon: FolderTree },
     ...(isAdminTier ? [{ name: "Manajemen Tim", href: "/dashboard/team", icon: Users }] : []),
   ];
 

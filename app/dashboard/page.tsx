@@ -16,6 +16,8 @@ const ACTIVITY_ICON: Record<string, any> = {
     employee: { icon: Users, tint: "bg-navy-50 text-navy-700" },
 };
 
+const FOLDER_COLORS = ["bg-navy-900", "bg-success", "bg-warning", "bg-danger", "bg-navy-700"];
+
 function formatTime(iso: string) {
     if (!iso) return "";
     return iso.slice(0, 16).replace("T", " ");
@@ -23,10 +25,12 @@ function formatTime(iso: string) {
 
 export default function DashboardPage() {
     const [view, setView] = useState<ViewMode>("overview");
+    const [filesInitialPath, setFilesInitialPath] = useState("/");
     const [docCount, setDocCount] = useState<number | string>("-");
     const [folderCount, setFolderCount] = useState<number | string>("-");
     const [employeeCount, setEmployeeCount] = useState<number | string>("-");
     const [chatCount, setChatCount] = useState<number | string>("-");
+    const [folderBreakdown, setFolderBreakdown] = useState<any[]>([]);
     const [recentActivity, setRecentActivity] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -39,11 +43,17 @@ export default function DashboardPage() {
                 setFolderCount(find("Total Folder"));
                 setEmployeeCount(find("Total Karyawan"));
                 setChatCount(find("Total Percakapan"));
+                setFolderBreakdown(result.folderBreakdown || []);
                 setRecentActivity(result.recent || []);
                 setIsLoading(false);
             })
             .catch(() => setIsLoading(false));
     }, []);
+
+    const openFiles = (path: string = "/") => {
+        setFilesInitialPath(path);
+        setView("files");
+    };
 
     const titles: Record<ViewMode, string> = {
         overview: "Dashboard",
@@ -70,7 +80,7 @@ export default function DashboardPage() {
             />
 
             <div className="p-8">
-                {view === "files" && <FileManagerBody />}
+                {view === "files" && <FileManagerBody initialPath={filesInitialPath} />}
                 {view === "employees" && <EmployeeDirectoryBody />}
                 {view === "chats" && <ChatHistoryBrowser />}
 
@@ -80,9 +90,9 @@ export default function DashboardPage() {
                     ) : (
                         <div className="space-y-6">
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                                {/* Kartu gabungan: Dokumen + Folder dalam 1 kotak, klik buka File Manager */}
+                                {/* Kartu gabungan: Dokumen + Folder dalam 1 kotak, klik buka File Manager di root */}
                                 <button
-                                    onClick={() => setView("files")}
+                                    onClick={() => openFiles("/")}
                                     className="rounded-[var(--radius-card)] border border-navy-100 bg-white p-5 text-left shadow-[var(--shadow-card)] transition-transform hover:-translate-y-0.5"
                                 >
                                     <span className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] bg-navy-900">
@@ -121,6 +131,36 @@ export default function DashboardPage() {
                                     <p className="text-sm text-ink-muted">Riwayat Percakapan</p>
                                 </button>
                             </div>
+
+                            {/* Preview root folder -- klik langsung ke folder itu di File Manager */}
+                            {folderBreakdown.length > 0 && (
+                                <div>
+                                    <div className="mb-3 flex items-center justify-between">
+                                        <h3 className="text-sm font-semibold text-ink">Folder</h3>
+                                        <button onClick={() => openFiles("/")} className="text-xs font-medium text-navy-700 hover:underline">
+                                            Lihat semua
+                                        </button>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                                        {folderBreakdown.map((f: any, i: number) => (
+                                            <button
+                                                key={f.path}
+                                                onClick={() => openFiles(f.path)}
+                                                className={cn(
+                                                    "flex flex-col items-start gap-3 rounded-[var(--radius-card)] p-4 text-left text-white shadow-[var(--shadow-card)] transition-transform hover:-translate-y-0.5",
+                                                    FOLDER_COLORS[i % FOLDER_COLORS.length]
+                                                )}
+                                            >
+                                                <Folder className="h-5 w-5 opacity-90" />
+                                                <div>
+                                                    <p className="font-mono-data text-xl font-semibold">{f.count}</p>
+                                                    <p className="truncate text-xs opacity-90">{f.name}</p>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="rounded-[var(--radius-card)] border border-navy-100 bg-white p-6 shadow-[var(--shadow-card)]">
                                 <h3 className="mb-4 text-sm font-semibold text-ink">Aktivitas Terbaru</h3>

@@ -740,7 +740,15 @@ async def upload_files_endpoint(
     folder_path: str = Form("/"),
     user: dict = Depends(get_current_user_context),
 ):
-    require_write(user)
+    # Karyawan (role dasar) BOLEH upload, tapi TIDAK boleh pilih folder --
+    # semua otomatis masuk "Kotak Masuk" (analog inbox email), baru
+    # Admin/SuperAdmin yang menyortir lewat File Manager (fitur Pindahkan
+    # dokumen sudah ada). Admin/SuperAdmin tetap bebas pilih folder tujuan.
+    if user["role"] == "Karyawan":
+        folder_path = "/Kotak Masuk/"
+    else:
+        require_write(user)
+
     company_id = user["company_id"]
 
     success_count = 0
@@ -858,6 +866,27 @@ async def list_users_endpoint(user: dict = Depends(get_current_user_context)):
     users_list = db.list_managed_users(
         user["company_id"], user["folder_access"], user["role"])
     return {"users": users_list}
+
+
+class UserProfileUpdateRequest(BaseModel):
+    full_name: Optional[str] = None
+    phone_number: Optional[str] = None
+    position_title: Optional[str] = None
+    permission_level: Optional[str] = None  # "crud" | "read_only" -- cuma berlaku untuk role Admin
+
+
+@app.patch("/api/team/users/{email}/profile")
+async def update_user_profile_endpoint(
+    email: str, req: UserProfileUpdateRequest, user: dict = Depends(get_current_user_context)
+):
+    require_write(user)
+    if req.full_name is not None or req.phone_number is not None:
+        db.update_user_profile(email, full_name=req.full_name, phone_number=req.phone_number)
+    if req.position_title is not None:
+        db.update_user_position(email, req.position_title)
+    if req.permission_level is not None:
+        db.update_admin_permission(email, req.permission_level)
+    return {"status": "success", "message": "Data karyawan diperbarui."}
 
 
 def require_team_view(viewer: dict, target_email: str):

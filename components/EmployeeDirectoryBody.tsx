@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import {
   Mail, Briefcase, Shield, FolderOpen, MessageSquare, ArrowLeft,
-  Search, FileText, Award, CheckCircle2, XCircle,
+  Search, FileText, Award, CheckCircle2, XCircle, Pencil, Check, X, Phone, IdCard,
 } from "lucide-react";
 import { apiJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,13 @@ export function EmployeeDirectoryBody() {
 
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [tab, setTab] = useState<Tab>("chat");
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editFullName, setEditFullName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editPosition, setEditPosition] = useState("");
+  const [editPermission, setEditPermission] = useState("crud");
+  const [isSaving, setIsSaving] = useState(false);
 
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -37,6 +44,7 @@ export function EmployeeDirectoryBody() {
     if (!q) return true;
     return (
       u.email?.toLowerCase().includes(q) ||
+      u.full_name?.toLowerCase().includes(q) ||
       u.position_title?.toLowerCase().includes(q) ||
       u.role?.toLowerCase().includes(q)
     );
@@ -44,12 +52,50 @@ export function EmployeeDirectoryBody() {
 
   const openEmployee = async (u: any) => {
     setSelectedUser(u);
+    setIsEditing(false);
+    setEditFullName(u.full_name || "");
+    setEditPhone(u.phone_number || "");
+    setEditPosition(u.position_title || "");
+    setEditPermission(u.permission_level || "crud");
     setSelectedSessionId(null);
     setMessages([]);
     setSessions([]);
     setReports([]);
     setAttempts([]);
     loadTab(u.email, "chat");
+  };
+
+  const saveProfile = async () => {
+    if (!selectedUser) return;
+    setIsSaving(true);
+    try {
+      const body: any = {
+        full_name: editFullName,
+        phone_number: editPhone,
+        position_title: editPosition,
+      };
+      if (selectedUser.role === "Admin") body.permission_level = editPermission;
+
+      await apiJson(`/api/team/users/${encodeURIComponent(selectedUser.email)}/profile`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+
+      const updated = {
+        ...selectedUser,
+        full_name: editFullName,
+        phone_number: editPhone,
+        position_title: editPosition,
+        permission_level: selectedUser.role === "Admin" ? editPermission : selectedUser.permission_level,
+      };
+      setSelectedUser(updated);
+      setUsers((prev) => prev.map((u) => (u.email === updated.email ? updated : u)));
+      setIsEditing(false);
+    } catch {
+      // gagal simpan -- diamkan, form tetap terbuka biar bisa dicoba lagi
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const loadTab = async (email: string, t: Tab) => {
@@ -94,23 +140,127 @@ export function EmployeeDirectoryBody() {
           <ArrowLeft className="h-3.5 w-3.5" /> Kembali ke daftar karyawan
         </button>
 
-        {/* Data diri */}
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-[var(--radius-card)] border border-navy-100 bg-white p-4">
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-navy-900 text-sm font-semibold text-white">
-            {selectedUser.email.slice(0, 2).toUpperCase()}
-          </span>
-          <div className="flex items-center gap-1.5 text-sm font-medium text-ink">
-            <Mail className="h-3.5 w-3.5 text-ink-faint" /> {selectedUser.email}
+        {/* Data diri -- formal, bisa diedit Admin/SuperAdmin */}
+        <div className="rounded-[var(--radius-card)] border border-navy-100 bg-white p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-ink">Data Diri</h3>
+            {!isEditing ? (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="flex items-center gap-1.5 text-xs font-medium text-navy-700 hover:underline"
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={saveProfile}
+                  disabled={isSaving}
+                  className="flex items-center gap-1 rounded bg-navy-900 px-3 py-1.5 text-2xs font-semibold text-white hover:bg-navy-800 disabled:opacity-50"
+                >
+                  <Check className="h-3.5 w-3.5" /> {isSaving ? "Menyimpan..." : "Simpan"}
+                </button>
+                <button
+                  onClick={() => setIsEditing(false)}
+                  className="flex items-center gap-1 rounded border border-navy-100 px-3 py-1.5 text-2xs font-medium text-ink-muted hover:bg-navy-50"
+                >
+                  <X className="h-3.5 w-3.5" /> Batal
+                </button>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-ink-muted">
-            <Briefcase className="h-3 w-3" /> {selectedUser.position_title || "-"}
+
+          <div className="flex items-center gap-3 mb-4">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-navy-900 text-sm font-semibold text-white">
+              {selectedUser.email.slice(0, 2).toUpperCase()}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-ink">{selectedUser.full_name || "(Nama belum diisi)"}</p>
+              <p className="flex items-center gap-1.5 text-xs text-ink-muted">
+                <Mail className="h-3 w-3" /> {selectedUser.email}
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-ink-muted">
-            <Shield className="h-3 w-3" /> {selectedUser.role}
-          </div>
-          <div className="flex items-center gap-1.5 font-mono-data text-2xs text-ink-faint">
-            <FolderOpen className="h-3 w-3" /> {selectedUser.folder_access}
-          </div>
+
+          {!isEditing ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div>
+                <p className="text-2xs text-ink-faint">No. Telepon</p>
+                <p className="text-xs font-medium text-ink">{selectedUser.phone_number || "-"}</p>
+              </div>
+              <div>
+                <p className="text-2xs text-ink-faint">Jabatan</p>
+                <p className="text-xs font-medium text-ink">{selectedUser.position_title || "-"}</p>
+              </div>
+              <div>
+                <p className="text-2xs text-ink-faint">Role</p>
+                <p className="text-xs font-medium text-ink">{selectedUser.role}</p>
+              </div>
+              <div>
+                <p className="text-2xs text-ink-faint">Folder Akses</p>
+                <p className="font-mono-data text-2xs text-ink">{selectedUser.folder_access}</p>
+              </div>
+              {selectedUser.role === "Admin" && (
+                <div>
+                  <p className="text-2xs text-ink-faint">Level Akses</p>
+                  <p className="text-xs font-medium text-ink">
+                    {selectedUser.permission_level === "read_only" ? "Read-only" : "CRUD"}
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 flex items-center gap-1 text-2xs font-semibold text-ink-muted">
+                  <IdCard className="h-3 w-3" /> Nama Lengkap
+                </label>
+                <input
+                  value={editFullName}
+                  onChange={(e) => setEditFullName(e.target.value)}
+                  placeholder="mis. Arman Wijaya"
+                  className="w-full rounded border border-navy-100 px-3 py-1.5 text-xs focus:border-navy-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 flex items-center gap-1 text-2xs font-semibold text-ink-muted">
+                  <Phone className="h-3 w-3" /> No. Telepon
+                </label>
+                <input
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  placeholder="mis. 0812xxxxxxx"
+                  className="w-full rounded border border-navy-100 px-3 py-1.5 text-xs focus:border-navy-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 flex items-center gap-1 text-2xs font-semibold text-ink-muted">
+                  <Briefcase className="h-3 w-3" /> Jabatan
+                </label>
+                <input
+                  value={editPosition}
+                  onChange={(e) => setEditPosition(e.target.value)}
+                  placeholder="mis. Sales Lapangan"
+                  className="w-full rounded border border-navy-100 px-3 py-1.5 text-xs focus:border-navy-500 focus:outline-none"
+                />
+              </div>
+              {selectedUser.role === "Admin" && (
+                <div>
+                  <label className="mb-1 flex items-center gap-1 text-2xs font-semibold text-ink-muted">
+                    <Shield className="h-3 w-3" /> Level Akses
+                  </label>
+                  <select
+                    value={editPermission}
+                    onChange={(e) => setEditPermission(e.target.value)}
+                    className="w-full rounded border border-navy-100 px-3 py-1.5 text-xs focus:border-navy-500 focus:outline-none"
+                  >
+                    <option value="crud">CRUD (bisa ubah/hapus)</option>
+                    <option value="read_only">Read-only (lihat saja)</option>
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Tabs */}
@@ -249,8 +399,9 @@ export function EmployeeDirectoryBody() {
               onClick={() => openEmployee(u)}
               className="flex w-full flex-col gap-1 border-b border-navy-50 px-4 py-3 text-left last:border-0 hover:bg-navy-50/60 sm:grid sm:grid-cols-[1fr_140px_120px_160px] sm:items-center sm:gap-0"
             >
-              <span className="flex items-center gap-2 text-sm font-medium text-ink">
-                <Mail className="h-3.5 w-3.5 text-ink-faint" /> {u.email}
+              <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-ink">
+                <Mail className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+                <span className="truncate">{u.full_name ? `${u.full_name} · ${u.email}` : u.email}</span>
               </span>
               <span className="flex items-center gap-1.5 text-xs text-ink-muted">
                 <Briefcase className="h-3 w-3" /> {u.position_title || "-"}

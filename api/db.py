@@ -504,7 +504,7 @@ def list_managed_users(company_id: str, viewer_folder_access: str, viewer_role: 
     query = (
         client.table("users")
         .select(
-            "email, role, folder_access, position_title, permission_level, created_at"
+            "email, role, folder_access, position_title, permission_level, created_at, full_name, phone_number"
         )
         .eq("company_id", company_id)
         .order("created_at", desc=True)
@@ -520,6 +520,20 @@ def update_user_position(email: str, position_title: str):
     client.table("users").update(
         {"position_title": (position_title or "").strip() or None}
     ).eq("email", email.strip().lower()).execute()
+
+
+def update_user_profile(email: str, full_name: str = None, phone_number: str = None):
+    """Data diri formal karyawan (nama lengkap, no. telepon) -- diisi/diedit
+    Admin/SuperAdmin dari halaman Direktori Karyawan, terpisah dari data
+    akses (role/folder/permission)."""
+    client = get_client()
+    updates = {}
+    if full_name is not None:
+        updates["full_name"] = full_name.strip() or None
+    if phone_number is not None:
+        updates["phone_number"] = phone_number.strip() or None
+    if updates:
+        client.table("users").update(updates).eq("email", email.strip().lower()).execute()
 
 
 def update_admin_permission(email: str, permission_level: str):

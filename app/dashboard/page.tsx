@@ -4,7 +4,7 @@ import { TopBar } from "@/components/TopBar";
 import { FileManagerBody } from "@/components/FileManagerBody";
 import { EmployeeDirectoryBody } from "@/components/EmployeeDirectoryBody";
 import { ChatHistoryBrowser } from "@/components/ChatHistoryBrowser";
-import { FileText, Users, MessageSquare, ArrowLeft, Folder } from "lucide-react";
+import { FileText, Users, MessageSquare, ArrowLeft, Folder, CalendarCheck, AlertCircle } from "lucide-react";
 import { apiJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -32,7 +32,15 @@ export default function DashboardPage() {
     const [chatCount, setChatCount] = useState<number | string>("-");
     const [folderBreakdown, setFolderBreakdown] = useState<any[]>([]);
     const [recentActivity, setRecentActivity] = useState<any[]>([]);
+    const [attendanceStatus, setAttendanceStatus] = useState<any>(null);
+    const [showBelumList, setShowBelumList] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        apiJson("/api/dashboard/attendance-status")
+            .then(setAttendanceStatus)
+            .catch(() => setAttendanceStatus(null));
+    }, []);
 
     useEffect(() => {
         apiJson("/api/dashboard")
@@ -131,6 +139,43 @@ export default function DashboardPage() {
                                     <p className="text-sm text-ink-muted">Riwayat Percakapan</p>
                                 </button>
                             </div>
+
+                            {/* Status Kehadiran hari ini -- badge, klik buat lihat siapa aja yang belum absen */}
+                            {attendanceStatus && (
+                                <div className="rounded-[var(--radius-card)] border border-navy-100 bg-white p-4">
+                                    <button
+                                        onClick={() => setShowBelumList((v) => !v)}
+                                        className="flex w-full items-center justify-between"
+                                    >
+                                        <div className="flex items-center gap-2.5">
+                                            <span className={cn(
+                                                "flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)]",
+                                                attendanceStatus.belum.length === 0 ? "bg-green-50 text-green-600" : "bg-amber-50 text-amber-600"
+                                            )}>
+                                                <CalendarCheck className="h-4 w-4" />
+                                            </span>
+                                            <p className="text-sm font-medium text-ink">
+                                                Kehadiran hari ini: {attendanceStatus.sudah.length}/{attendanceStatus.total} sudah absen
+                                            </p>
+                                        </div>
+                                        {attendanceStatus.belum.length > 0 && (
+                                            <span className="text-xs font-medium text-navy-700">
+                                                {showBelumList ? "Sembunyikan" : "Lihat yang belum"}
+                                            </span>
+                                        )}
+                                    </button>
+                                    {showBelumList && attendanceStatus.belum.length > 0 && (
+                                        <div className="mt-3 space-y-1.5 border-t border-navy-50 pt-3">
+                                            {attendanceStatus.belum.map((u: any) => (
+                                                <div key={u.email} className="flex items-center gap-2 text-xs text-ink-muted">
+                                                    <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+                                                    {u.position_title ? `${u.position_title} -- ` : ""}{u.email}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
 
                             {/* Preview root folder -- klik langsung ke folder itu di File Manager */}
                             {folderBreakdown.length > 0 && (

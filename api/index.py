@@ -64,6 +64,7 @@ class EmployeeBulkRequest(BaseModel):
     emails: str  # teks bebas, email diekstrak via regex (sama seperti app.py)
     folder: str
     position_title: Optional[str] = None
+    manager_email: Optional[str] = None  # atasan langsung -- opsional, terpisah dari role
 
 
 class AdminAddRequest(BaseModel):
@@ -71,6 +72,7 @@ class AdminAddRequest(BaseModel):
     folder: str
     permission_level: str = "crud"  # "crud" | "read_only"
     position_title: Optional[str] = None
+    manager_email: Optional[str] = None
 
 
 class QuizAttemptRequest(BaseModel):
@@ -805,7 +807,8 @@ async def add_employees_endpoint(
         raise HTTPException(
             status_code=400, detail="Tidak ada email valid ditemukan.")
     temp_passwords = db.add_users_bulk(
-        email_list, req.folder, user["company_id"], position_title=req.position_title
+        email_list, req.folder, user["company_id"], position_title=req.position_title,
+        manager_email=req.manager_email,
     )
     return {
         "status": "success",
@@ -823,7 +826,7 @@ async def add_admin_endpoint(
         raise HTTPException(status_code=400, detail="Email wajib diisi.")
     temp_pw = db.add_admin(
         req.email, req.folder, req.permission_level, user["company_id"],
-        position_title=req.position_title,
+        position_title=req.position_title, manager_email=req.manager_email,
     )
     return {
         "status": "success",
@@ -873,6 +876,7 @@ class UserProfileUpdateRequest(BaseModel):
     phone_number: Optional[str] = None
     position_title: Optional[str] = None
     permission_level: Optional[str] = None  # "crud" | "read_only" -- cuma berlaku untuk role Admin
+    manager_email: Optional[str] = None  # atasan langsung -- kirim "" untuk hapus atasan
 
 
 @app.patch("/api/team/users/{email}/profile")
@@ -886,7 +890,60 @@ async def update_user_profile_endpoint(
         db.update_user_position(email, req.position_title)
     if req.permission_level is not None:
         db.update_admin_permission(email, req.permission_level)
+    if req.manager_email is not None:
+        db.update_user_manager(email, req.manager_email)
     return {"status": "success", "message": "Data karyawan diperbarui."}
+
+
+# ====================================================================
+# PENGATURAN PERUSAHAAN (toggle fitur, khusus Owner/Admin)
+# ====================================================================
+class CompanySettingsUpdateRequest(BaseModel):
+    poin_pelanggaran_enabled: Optional[bool] = None
+    notify_atasan_enabled: Optional[bool] = None
+    attendance_deadline_hour: Optional[int] = None
+
+
+@app.get("/api/settings/company")
+async def get_company_settings_endpoint(user: dict = Depends(get_current_user_context)):
+    return db.get_company_settings(user["company_id"])
+
+
+@app.patch("/api/settings/company")
+async def update_company_settings_endpoint(
+    req: CompanySettingsUpdateRequest, user: dict = Depends(get_current_user_context)
+):
+    if not is_admin_tier(user):
+        raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
+    updated = db.update_company_settings(
+        user["company_id"],
+        poin_pelanggaran_enabled=req.poin_pelanggaran_enabled,
+        notify_atasan_enabled=req.notify_atasan_enabled,
+        attendance_deadline_hour=req.attendance_deadline_hour,
+    )
+    return {"status": "success", "settings": updated}
+
+
+# ====================================================================
+# KEHADIRAN (Form Kehadiran harian)
+# ====================================================================
+@app.post("/api/attendance/check-in")
+async def check_in_attendance_endpoint(user: dict = Depends(get_current_user_context)):
+    record = db.check_in_attendance(user["email"], user["company_id"])
+    return {"status": "success", "message": "Kehadiran tercatat.", "attendance": record}
+
+
+@app.get("/api/attendance/today")
+async def get_today_attendance_endpoint(user: dict = Depends(get_current_user_context)):
+    record = db.get_today_attendance(user["email"], user["company_id"])
+    return {"checkedIn": record is not None, "attendance": record}
+
+
+@app.get("/api/dashboard/attendance-status")
+async def dashboard_attendance_status_endpoint(user: dict = Depends(get_current_user_context)):
+    if not is_admin_tier(user):
+        raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
+    return db.get_attendance_status_today(user["company_id"])
 
 
 def require_team_view(viewer: dict, target_email: str):

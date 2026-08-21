@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { UserPlus } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { FolderTreePicker } from "@/components/FolderTreePicker";
@@ -11,11 +11,19 @@ export default function TeamPage() {
   const [emails, setEmails] = useState("");
   const [folder, setFolder] = useState("/");
   const [positionTitle, setPositionTitle] = useState("");
+  const [managerEmail, setManagerEmail] = useState("");
+  const [existingUsers, setExistingUsers] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const [isSuccess, setIsSuccess] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [tempPasswords, setTempPasswords] = useState<Record<string, string> | null>(null);
   const { showToast } = useToast();
+
+  useEffect(() => {
+    apiJson("/api/team/users")
+      .then((data) => setExistingUsers(data.users || []))
+      .catch(() => setExistingUsers([]));
+  }, []);
 
   const copyAllAsTable = () => {
     if (!tempPasswords) return;
@@ -39,7 +47,12 @@ export default function TeamPage() {
     try {
       const data = await apiJson("/api/team/employees", {
         method: "POST",
-        body: JSON.stringify({ emails, folder, position_title: positionTitle || undefined }),
+        body: JSON.stringify({
+          emails,
+          folder,
+          position_title: positionTitle || undefined,
+          manager_email: managerEmail || undefined,
+        }),
       });
 
       setIsSuccess(true);
@@ -86,6 +99,25 @@ export default function TeamPage() {
           </div>
 
           <div>
+            <label className="mb-1 block text-xs font-semibold text-ink-muted">Atasan Langsung (opsional)</label>
+            <select
+              value={managerEmail}
+              onChange={(e) => setManagerEmail(e.target.value)}
+              className="w-full rounded border border-navy-100 px-3 py-2 text-sm focus:outline-none focus:border-navy-500"
+            >
+              <option value="">-- Tidak ada / langsung ke Owner --</option>
+              {existingUsers.map((u: any) => (
+                <option key={u.email} value={u.email}>
+                  {u.full_name ? `${u.full_name} (${u.email})` : u.email}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-2xs text-ink-faint">
+              Menentukan siapa yang melihat laporan/kehadiran karyawan ini -- terpisah dari akses folder.
+            </p>
+          </div>
+
+          <div>
             <p className="mb-1 text-xs font-semibold text-ink-muted">Folder Akses Terpilih</p>
             <div className="rounded border border-navy-100 bg-navy-50 px-3 py-2 font-mono-data text-sm text-navy-900">
               {folder}
@@ -114,7 +146,6 @@ export default function TeamPage() {
                 <Copy className="h-3.5 w-3.5" /> Salin Semua sebagai Tabel
               </button>
               <div className="overflow-hidden rounded border border-navy-100">
-                {/* table yang sudah ada, tidak berubah */}
                 <table className="w-full text-xs">
                   <thead className="bg-navy-50">
                     <tr>
@@ -134,17 +165,17 @@ export default function TeamPage() {
               </div>
             </div>
           )}
-            </div>
+        </div>
 
         {/* Kolom kanan: folder tree picker */}
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold text-ink">Pilih Folder Akses</h3>
-            <p className="text-xs text-ink-faint">
-              Karyawan yang didaftarkan hanya bisa melihat dokumen di dalam folder ini (dan sub-foldernya).
-            </p>
-            <FolderTreePicker value={folder} onChange={setFolder} />
-          </div>
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-ink">Pilih Folder Akses</h3>
+          <p className="text-xs text-ink-faint">
+            Karyawan yang didaftarkan hanya bisa melihat dokumen di dalam folder ini (dan sub-foldernya).
+          </p>
+          <FolderTreePicker value={folder} onChange={setFolder} />
         </div>
       </div>
-      );
+    </div>
+  );
 }

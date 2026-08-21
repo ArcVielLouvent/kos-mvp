@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import {
   Mail, Briefcase, Shield, FolderOpen, MessageSquare, ArrowLeft,
-  Search, FileText, Award, CheckCircle2, XCircle, Pencil, Check, X, Phone, IdCard,
+  Search, FileText, Award, CheckCircle2, XCircle, Pencil, Check, X, Phone, IdCard, Users,
 } from "lucide-react";
 import { apiJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,7 @@ export function EmployeeDirectoryBody() {
   const [editPhone, setEditPhone] = useState("");
   const [editPosition, setEditPosition] = useState("");
   const [editPermission, setEditPermission] = useState("crud");
+  const [editManagerEmail, setEditManagerEmail] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
   const [sessions, setSessions] = useState<any[]>([]);
@@ -57,6 +58,7 @@ export function EmployeeDirectoryBody() {
     setEditPhone(u.phone_number || "");
     setEditPosition(u.position_title || "");
     setEditPermission(u.permission_level || "crud");
+    setEditManagerEmail(u.manager_email || "");
     setSelectedSessionId(null);
     setMessages([]);
     setSessions([]);
@@ -73,6 +75,7 @@ export function EmployeeDirectoryBody() {
         full_name: editFullName,
         phone_number: editPhone,
         position_title: editPosition,
+        manager_email: editManagerEmail,
       };
       if (selectedUser.role === "Admin") body.permission_level = editPermission;
 
@@ -86,6 +89,7 @@ export function EmployeeDirectoryBody() {
         full_name: editFullName,
         phone_number: editPhone,
         position_title: editPosition,
+        manager_email: editManagerEmail,
         permission_level: selectedUser.role === "Admin" ? editPermission : selectedUser.permission_level,
       };
       setSelectedUser(updated);
@@ -200,6 +204,10 @@ export function EmployeeDirectoryBody() {
                 <p className="text-2xs text-ink-faint">Folder Akses</p>
                 <p className="font-mono-data text-2xs text-ink">{selectedUser.folder_access}</p>
               </div>
+              <div>
+                <p className="text-2xs text-ink-faint">Atasan Langsung</p>
+                <p className="text-xs font-medium text-ink">{selectedUser.manager_email || "-- (langsung ke Owner)"}</p>
+              </div>
               {selectedUser.role === "Admin" && (
                 <div>
                   <p className="text-2xs text-ink-faint">Level Akses</p>
@@ -243,6 +251,25 @@ export function EmployeeDirectoryBody() {
                   placeholder="mis. Sales Lapangan"
                   className="w-full rounded border border-navy-100 px-3 py-1.5 text-xs focus:border-navy-500 focus:outline-none"
                 />
+              </div>
+              <div>
+                <label className="mb-1 flex items-center gap-1 text-2xs font-semibold text-ink-muted">
+                  <Users className="h-3 w-3" /> Atasan Langsung
+                </label>
+                <select
+                  value={editManagerEmail}
+                  onChange={(e) => setEditManagerEmail(e.target.value)}
+                  className="w-full rounded border border-navy-100 px-3 py-1.5 text-xs focus:border-navy-500 focus:outline-none"
+                >
+                  <option value="">-- Tidak ada / langsung ke Owner --</option>
+                  {users
+                    .filter((u) => u.email !== selectedUser.email)
+                    .map((u) => (
+                      <option key={u.email} value={u.email}>
+                        {u.full_name ? `${u.full_name} (${u.email})` : u.email}
+                      </option>
+                    ))}
+                </select>
               </div>
               {selectedUser.role === "Admin" && (
                 <div>

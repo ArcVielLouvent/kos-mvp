@@ -93,7 +93,8 @@ def update_password(email: str, new_password: str):
 # KARYAWAN
 # ==========================================
 def add_users_bulk(
-    emails: list, folder_access: str, company_id: str, position_title: str = None
+    emails: list, folder_access: str, company_id: str, position_title: str = None,
+    manager_email: str = None,
 ) -> dict:
     client = get_client()
     folder_access = normalize_folder(folder_access)
@@ -117,6 +118,7 @@ def add_users_bulk(
                 "company_id": company_id,
                 "must_change_password": True,
                 "position_title": (position_title or "").strip() or None,
+                "manager_email": (manager_email or "").strip().lower() or None,
             }
         )
 
@@ -132,6 +134,7 @@ def add_admin(
     permission_level: str,
     company_id: str,
     position_title: str = None,
+    manager_email: str = None,
 ) -> str:
     """Tambah akun Admin baru (bukan Karyawan) -- khusus dipanggil SuperAdmin/Admin crud."""
     client = get_client()
@@ -149,6 +152,7 @@ def add_admin(
             "company_id": company_id,
             "must_change_password": True,
             "position_title": (position_title or "").strip() or None,
+            "manager_email": (manager_email or "").strip().lower() or None,
         },
         on_conflict="email",
     ).execute()
@@ -534,6 +538,126 @@ def update_user_profile(email: str, full_name: str = None, phone_number: str = N
         updates["phone_number"] = phone_number.strip() or None
     if updates:
         client.table("users").update(updates).eq("email", email.strip().lower()).execute()
+
+
+def update_user_manager(email: str, manager_email: str = None):
+    """Atur/ubah atasan langsung (dipisah dari role sistem -- role ngatur
+    akses fitur, manager_email ngatur siapa lihat laporan siapa)."""
+    client = get_client()
+    client.table("users").update(
+        {"manager_email": (manager_email or "").strip().lower() or None}
+    ).eq("email", email.strip().lower()).execute()
+
+
+# ==========================================
+# PENGATURAN PERUSAHAAN (toggle level company, diatur Owner)
+# ==========================================
+def get_company_settings(company_id: str) -> dict:
+    client = get_client()
+    r = (
+        client.table("company_settings")
+        .select("*")
+        .eq("company_id", company_id)
+        .execute()
+    )
+    if r.data:
+        return r.data[0]
+    # default kalau belum pernah disetting -- semua fitur opsional OFF dulu
+    return {
+        "company_id": company_id,
+        "poin_pelanggaran_enabled": False,
+        "notify_atasan_enabled": False,
+        "attendance_deadline_hour": 24,
+    }
+
+
+def update_company_settings(company_id: str, **fields) -> dict:
+    client = get_client()
+    payload = {"company_id": company_id, **{k: v for k, v in fields.items() if v is not None}}
+    client.table("company_settings").upsert(payload, on_conflict="company_id").execute()
+    return get_company_settings(company_id)
+
+
+# ==========================================
+# KEHADIRAN (Form Kehadiran harian)
+# ==========================================
+def check_in_attendance(user_email: str, company_id: str) -> dict:
+    """Idempotent -- kalau hari ini sudah check-in, balikin record yang sudah
+    ada (bukan bikin baris baru), supaya karyawan gak bisa check-in dobel."""
+    client = get_client()
+    today = _today_str()
+
+    existing = (
+        client.table("attendance")
+        .select("*")
+        .eq("user_email", user_email.strip().lower())
+        .eq("company_id", company_id)
+        .eq("attendance_date", today)
+        .execute()
+    )
+    if existing.data:
+        return existing.data[0]
+
+    r = (
+        client.table("attendance")
+        .insert(
+            {
+                "user_email": user_email.strip().lower(),
+                "company_id": company_id,
+                "attendance_date": today,
+            }
+        )
+        .execute()
+    )
+    return r.data[0]
+
+
+def get_today_attendance(user_email: str, company_id: str):
+    client = get_client()
+    r = (
+        client.table("attendance")
+        .select("*")
+        .eq("user_email", user_email.strip().lower())
+        .eq("company_id", company_id)
+        .eq("attendance_date", _today_str())
+        .execute()
+    )
+    return r.data[0] if r.data else None
+
+
+def get_attendance_status_today(company_id: str) -> dict:
+    """Dipakai Dashboard Owner/atasan: siapa aja yang SUDAH dan BELUM
+    check-in hari ini. SuperAdmin dikecualikan dari daftar 'belum' by
+    default (Owner tidak wajib lapor), tapi tetap boleh check-in kalau mau."""
+    client = get_client()
+    today = _today_str()
+
+    users_r = (
+        client.table("users")
+        .select("email, role, position_title, manager_email")
+        .eq("company_id", company_id)
+        .neq("role", "SuperAdmin")
+        .execute()
+    )
+    attendance_r = (
+        client.table("attendance")
+        .select("user_email")
+        .eq("company_id", company_id)
+        .eq("attendance_date", today)
+        .execute()
+    )
+    checked_in_emails = {a["user_email"] for a in attendance_r.data}
+
+    sudah, belum = [], []
+    for u in users_r.data:
+        (sudah if u["email"] in checked_in_emails else belum).append(u)
+
+    return {"sudah": sudah, "belum": belum, "total": len(users_r.data)}
+
+
+def _today_str() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
 def update_admin_permission(email: str, permission_level: str):

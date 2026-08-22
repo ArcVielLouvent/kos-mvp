@@ -1,0 +1,24 @@
+# Dockerfile khusus BACKEND (FastAPI) untuk Railway.
+# Frontend (Next.js) TIDAK pakai file ini -- itu tetap di Vercel.
+#
+# Build context = root repo (bukan folder api/) supaya `api` tetap
+# ke-detect sebagai package Python yang utuh (untuk `from . import ai` dkk).
+FROM python:3.11-slim
+
+WORKDIR /srv
+
+# Dependensi sistem yang dibutuhkan pdf2image/pytesseract (OCR PDF hasil scan)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    poppler-utils \
+    tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY api/requirements.txt ./api/requirements.txt
+RUN pip install --no-cache-dir -r api/requirements.txt
+
+COPY api/ ./api/
+
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8000
+
+CMD ["sh", "-c", "uvicorn api.index:app --host 0.0.0.0 --port ${PORT:-8000}"]

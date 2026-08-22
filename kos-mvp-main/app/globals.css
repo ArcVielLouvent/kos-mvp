@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+@theme {
+    /* ===== Warna: putih + navy (permintaan Pak Dianata) ===== */
+    --color-navy-950: #0a1930;
+    --color-navy-900: #0f2942;
+    --color-navy-800: #16324f;
+    --color-navy-700: #1e3a5f;
+    --color-navy-500: #3b6ea5;
+    --color-navy-300: #8fb3d9;
+    --color-navy-100: #e8eef5;
+    --color-navy-50: #f5f8fb;
+    --color-ink: #101828;
+    --color-ink-muted: #475467;
+    --color-ink-faint: #98a2b3;
+    --color-success: #16a34a;
+    --color-warning: #d97706;
+    --color-danger: #dc2626;
+
+    /* ===== Tipografi ===== */
+    --font-display: var(--font-manrope);
+    --font-body: var(--font-inter);
+    --font-mono: var(--font-plex-mono);
+
+    /* ===== Radius & shadow: tegas tapi tidak bulat berlebihan ===== */
+    --radius-card: 10px;
+    --radius-control: 8px;
+    --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.06);
+    --shadow-panel: 0 4px 12px rgba(10, 25, 48, 0.08);
+}
+
+body {
+    background: #ffffff;
+    color: var(--color-ink);
+    font-family: var(--font-body);
+}
+
+h1,
+h2,
+h3,
+h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+}
+
+.font-mono-data {
+    font-family: var(--font-mono);
+}
+
+/* Fokus keyboard tetap terlihat jelas (aksesibilitas) */
+:focus-visible {
+    outline: 2px solid var(--color-navy-500);
+    outline-offset: 2px;
+}
+
+/* Kecualikan form input -- mereka udah punya indikator fokus sendiri
+   (border biru custom di tiap komponen), outline generic bikin dobel */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+    outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* Slider (input[type=range]) -- style manual cross-browser karena
+   `appearance-none` menghilangkan thumb bawaan tanpa ini (thumb jadi
+   tidak kelihatan/tidak bisa di-drag di Chrome/Safari). Dipakai di
+   Pengaturan > Batas Waktu Lapor Harian. */
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--color-navy-100, #e2e8f0);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    margin-top: -7px;
+    height: 20px;
+    width: 20px;
+    border-radius: 9999px;
+    background: var(--color-navy-900, #0f172a);
+    border: 3px solid #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+    cursor: pointer;
+}
+
+input[type="range"]::-moz-range-track {
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--color-navy-100, #e2e8f0);
+}
+
+input[type="range"]::-moz-range-thumb {
+    height: 20px;
+    width: 20px;
+    border-radius: 9999px;
+    background: var(--color-navy-900, #0f172a);
+    border: 3px solid #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+    cursor: pointer;
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb {
+    cursor: not-allowed;
+}
+
+input[type="range"]:disabled::-moz-range-thumb {
+    cursor: not-allowed;
+}

@@ -14,7 +14,7 @@ jobs:
           cache: "pip" # Mengaktifkan caching otomatis untuk mempercepat build selanjutnya
 
       - name: Install Dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r api/requirements.txt
 
       - name: AST Syntax Check
         run: |

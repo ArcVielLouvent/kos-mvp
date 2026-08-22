@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { apiJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 
 type Tab = "chat" | "reports" | "quiz";
 
@@ -32,6 +33,7 @@ export function EmployeeDirectoryBody() {
   const [reports, setReports] = useState<any[]>([]);
   const [attempts, setAttempts] = useState<any[]>([]);
   const [tabLoading, setTabLoading] = useState(false);
+  const [previewFile, setPreviewFile] = useState<{ title: string; file_url: string } | null>(null);
 
   useEffect(() => {
     apiJson("/api/team/users")
@@ -110,7 +112,7 @@ export function EmployeeDirectoryBody() {
         const data = await apiJson(`/api/team/users/${encodeURIComponent(email)}/chat-sessions`);
         setSessions(data.sessions || []);
       } else if (t === "reports") {
-        const data = await apiJson(`/api/team/users/${encodeURIComponent(email)}/reports`);
+        const data = await apiJson(`/api/team/users/${encodeURIComponent(email)}/work-reports`);
         setReports(data.reports || []);
       } else if (t === "quiz") {
         const data = await apiJson(`/api/team/users/${encodeURIComponent(email)}/quiz-attempts`);
@@ -136,6 +138,7 @@ export function EmployeeDirectoryBody() {
   // ---------- DETAIL KARYAWAN ----------
   if (selectedUser) {
     return (
+      <>
       <div className="space-y-4">
         <button
           onClick={() => setSelectedUser(null)}
@@ -355,14 +358,27 @@ export function EmployeeDirectoryBody() {
             ) : (
               reports.map((r: any) => (
                 <div key={r.id} className="rounded-[var(--radius-card)] border border-navy-100 bg-white p-4">
-                  <p className="mb-2 text-2xs text-ink-faint">{(r.created_at || "").slice(0, 16).replace("T", " ")}</p>
-                  {r.content && <p className="mb-2 whitespace-pre-wrap text-sm text-ink">{r.content}</p>}
-                  {r.media_url && r.media_type === "video" && (
-                    <video src={r.media_url} controls className="max-w-md rounded-[var(--radius-control)]" />
-                  )}
-                  {r.media_url && r.media_type === "audio" && (
-                    <audio src={r.media_url} controls className="w-full max-w-md" />
-                  )}
+                  <p className="mb-2 text-2xs font-semibold text-ink-faint">
+                    {new Date(r.report_date).toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                  </p>
+                  <div className="space-y-1.5">
+                    {(r.rows || []).map((row: any) => (
+                      <div key={row.id} className="flex items-start justify-between gap-3 rounded-[var(--radius-control)] bg-navy-50/50 px-3 py-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm text-ink">{row.description}</p>
+                          {row.time_note && <p className="mt-0.5 text-2xs text-ink-faint">{row.time_note}</p>}
+                        </div>
+                        {row.attachment_url && (
+                          <button
+                            onClick={() => setPreviewFile({ title: row.attachment_url.split("/").pop()?.split("?")[0] || "Lampiran", file_url: row.attachment_url })}
+                            className="flex shrink-0 items-center gap-1 rounded border border-navy-100 bg-white px-2 py-1 text-2xs font-semibold text-navy-900 hover:bg-navy-100"
+                          >
+                            <FileText className="h-3 w-3" /> Lihat
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))
             )}
@@ -392,6 +408,8 @@ export function EmployeeDirectoryBody() {
           </div>
         )}
       </div>
+      {previewFile && <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
+      </>
     );
   }
 

@@ -38,6 +38,12 @@ Isinya: tabel form builder (`form_templates`, `form_fields`,
 (`notifications`), poin pelanggaran -- skema saja, belum aktif di UI
 (`violation_points`), dan broadcast pengumuman (`announcements`).
 
+## 4b. Migrasi database (Scope D -- Form Lapor Kerjaan, beda dari Kehadiran)
+
+Jalankan juga `api/migration_scope_d.sql` -- tabel `work_reports` +
+`work_report_rows` untuk laporan kerjaan detail dengan baris dinamis ala
+Google Sheet (terpisah dari Form Kehadiran di Scope C).
+
 ## 5. Email broadcast (opsional, tapi disarankan diisi)
 
 Tambahkan di Railway Variables kalau mau broadcast pengumuman benar-benar

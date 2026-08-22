@@ -1566,3 +1566,156 @@ def list_announcements(company_id: str, limit: int = 30):
         .execute()
     )
     return r.data
+
+
+# ============================================================
+# KLASIFIKASI JENIS FILE -- helper terpusat, dipakai di semua tempat yang
+# perlu tahu jenis lampiran (Lapor Kerjaan, Form Kehadiran, dst).
+#
+# BUG LAMA yang diperbaiki di sini: logika sebelumnya cuma ngecek
+# ext in ["mp4","mov"] -> "video", SELAIN itu langsung dianggap "audio"
+# TANPA PENGECUALIAN -- jadi foto (.jpg/.png) dan dokumen (.pdf/.docx)
+# ikut kelabelan "audio" dan tampilannya di frontend jadi rusak (coba
+# di-render sebagai <audio>, gagal total). Sekarang eksplisit 4 kategori:
+# image / video / audio / document, dengan fallback "document" (bukan
+# "audio") untuk ekstensi yang tidak dikenal.
+# ============================================================
+def classify_file_kind(filename: str) -> str:
+    ext = (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+    if ext in ("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif"):
+        return "image"
+    if ext in ("mp4", "mov", "webm", "avi", "mkv", "3gp"):
+        return "video"
+    if ext in ("mp3", "wav", "aac", "ogg", "flac", "m4a", "aiff"):
+        return "audio"
+    return "document"  # fallback aman -- dokumen/PDF/lain-lain, BUKAN audio
+
+
+# ============================================================
+# FORM LAPOR KERJAAN -- BEDA dari Form Kehadiran. Ini laporan detail
+# pekerjaan harian dengan BARIS DINAMIS ala Google Sheet (karyawan bebas
+# nambah baris sendiri, 1 baris = 1 item pekerjaan), lampiran opsional
+# per baris (foto/dokumen/video, boleh kosong), tanggal/jam/nama
+# OTOMATIS terisi dari user_email + report_date + submitted_at (bukan
+# field yang diketik manual).
+# ============================================================
+def get_today_work_report(user_email: str, company_id: str):
+    client = get_client()
+    r = (
+        client.table("work_reports")
+        .select("*")
+        .eq("user_email", user_email.strip().lower())
+        .eq("company_id", company_id)
+        .eq("report_date", _today_str())
+        .execute()
+    )
+    if not r.data:
+        return None
+    report = r.data[0]
+    rows = (
+        client.table("work_report_rows")
+        .select("*")
+        .eq("report_id", report["id"])
+        .order("row_order")
+        .execute()
+    )
+    report["rows"] = rows.data
+    return report
+
+
+def save_work_report(user_email: str, company_id: str, rows: list):
+    """Idempotent per hari (1 report per user per tanggal, UNIQUE constraint)
+    -- baris lama ditimpa total dengan baris final yang dikirim (konsisten
+    dengan pola submit_daily_form: kirim seluruh daftar baris, bukan diff).
+    Lampiran per baris OPSIONAL -- baris tanpa attachment_url tetap sah
+    selama description-nya ada."""
+    client = get_client()
+    user_email = user_email.strip().lower()
+    today = _today_str()
+
+    existing = (
+        client.table("work_reports")
+        .select("id")
+        .eq("user_email", user_email)
+        .eq("company_id", company_id)
+        .eq("report_date", today)
+        .execute()
+    )
+    if existing.data:
+        report_id = existing.data[0]["id"]
+        client.table("work_report_rows").delete().eq("report_id", report_id).execute()
+        client.table("work_reports").update({"updated_at": "now()"}).eq("id", report_id).execute()
+    else:
+        created = (
+            client.table("work_reports")
+            .insert({
+                "company_id": company_id,
+                "user_email": user_email,
+                "report_date": today,
+            })
+            .execute()
+        )
+        report_id = created.data[0]["id"]
+
+    row_payload = []
+    for i, row in enumerate(rows):
+        if not (row.get("description") or "").strip():
+            continue  # baris kosong (belum diisi user) -- jangan disimpan
+        row_payload.append({
+            "report_id": report_id,
+            "row_order": i,
+            "description": row["description"].strip(),
+            "time_note": (row.get("time_note") or "").strip() or None,
+            "attachment_url": row.get("attachment_url"),
+            "attachment_kind": row.get("attachment_kind"),
+        })
+    if row_payload:
+        client.table("work_report_rows").insert(row_payload).execute()
+
+    return get_today_work_report(user_email, company_id)
+
+
+def get_user_work_reports(user_email: str, limit: int = 30):
+    """Riwayat laporan kerjaan milik satu karyawan (dipakai untuk halaman
+    'Riwayat Laporan Saya' karyawan itu sendiri, DAN halaman Direktori
+    Karyawan buat Admin/SuperAdmin lihat laporan bawahannya)."""
+    client = get_client()
+    reports_r = (
+        client.table("work_reports")
+        .select("*")
+        .eq("user_email", user_email.strip().lower())
+        .order("report_date", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    reports = reports_r.data
+    ids = [r["id"] for r in reports]
+    if ids:
+        rows_r = (
+            client.table("work_report_rows")
+            .select("*")
+            .in_("report_id", ids)
+            .order("row_order")
+            .execute()
+        )
+        by_report: dict = {}
+        for row in rows_r.data:
+            by_report.setdefault(row["report_id"], []).append(row)
+        for r in reports:
+            r["rows"] = by_report.get(r["id"], [])
+    return reports
+
+
+def upload_work_report_attachment(
+    company_id: str, user_email: str, row_key: str, file_bytes: bytes, filename: str
+) -> dict:
+    client = get_client()
+    storage_path = f"{company_id}/work-reports/{user_email}/{_today_str()}/{row_key}_{filename}"
+    client.storage.from_("company-files").upload(
+        storage_path, file_bytes, {"upsert": "true"}
+    )
+    signed = client.storage.from_("company-files").create_signed_url(
+        storage_path, 3600 * 24 * 30
+    )
+    url = signed.get("signedURL") or signed.get("signed_url")
+    return {"url": url, "kind": classify_file_kind(filename)}

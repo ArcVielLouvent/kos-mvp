@@ -1051,9 +1051,8 @@ async def add_report_endpoint(
     media_url = None
     media_type = "text"
     if media:
-        ext = media.filename.split(".")[-1].lower()
-        media_type = "video" if ext in ["mp4", "mov"] else "audio"
         file_bytes = await media.read()
+        media_type = db.classify_file_kind(media.filename)  # bug lama: cuma kenal mp4/mov, selain itu dianggap "audio" -- sekarang eksplisit image/video/audio/document
         media_url = db.upload_report_media(
             user["company_id"], user["email"], file_bytes, media.filename
         )
@@ -1340,13 +1339,7 @@ async def upload_form_answer_endpoint(
     submit sebagai jawaban field itu."""
     file_bytes = await file.read()
     url = db.upload_form_file(user["company_id"], user["email"], field_id, file_bytes, file.filename)
-    ext = file.filename.split(".")[-1].lower()
-    if ext in ("mp4", "mov", "webm", "avi", "mkv", "3gp"):
-        kind = "video"
-    elif ext in ("mp3", "wav", "aac", "ogg", "flac", "m4a"):
-        kind = "audio"
-    else:
-        kind = "document"
+    kind = db.classify_file_kind(file.filename)
     return {"status": "success", "file_url": url, "file_kind": kind}
 
 
@@ -1432,3 +1425,67 @@ async def list_announcements_endpoint(user: dict = Depends(get_current_user_cont
     if not is_admin_tier(user):
         raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
     return {"announcements": db.list_announcements(user["company_id"])}
+
+
+# ====================================================================
+# FORM LAPOR KERJAAN -- BEDA dari Form Kehadiran. Laporan detail
+# pekerjaan harian dengan baris dinamis ala Google Sheet (karyawan bebas
+# nambah baris sendiri), lampiran opsional per baris (foto/dokumen/video,
+# boleh kosong), tanggal/jam/nama OTOMATIS (bukan diketik manual).
+# ====================================================================
+class WorkReportRowInput(BaseModel):
+    description: str
+    time_note: Optional[str] = None
+    attachment_url: Optional[str] = None
+    attachment_kind: Optional[str] = None
+
+
+class SaveWorkReportRequest(BaseModel):
+    rows: List[WorkReportRowInput] = []
+
+
+@app.get("/api/work-reports/today")
+async def get_today_work_report_endpoint(user: dict = Depends(get_current_user_context)):
+    report = db.get_today_work_report(user["email"], user["company_id"])
+    return {"report": report}
+
+
+@app.post("/api/work-reports/submit")
+async def submit_work_report_endpoint(
+    req: SaveWorkReportRequest, user: dict = Depends(get_current_user_context)
+):
+    rows = [r.model_dump() for r in req.rows if r.description.strip()]
+    if not rows:
+        raise HTTPException(status_code=400, detail="Isi minimal 1 baris pekerjaan.")
+    report = db.save_work_report(user["email"], user["company_id"], rows)
+    return {"status": "success", "message": "Laporan kerjaan tersimpan.", "report": report}
+
+
+@app.post("/api/work-reports/upload-attachment")
+async def upload_work_report_attachment_endpoint(
+    row_key: str = Form(...),
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user_context),
+):
+    """Lampiran per baris OPSIONAL -- endpoint ini cuma dipanggil kalau
+    karyawan memang melampirkan file di baris itu, tidak wajib."""
+    file_bytes = await file.read()
+    result = db.upload_work_report_attachment(
+        user["company_id"], user["email"], row_key, file_bytes, file.filename
+    )
+    return {"status": "success", "file_url": result["url"], "file_kind": result["kind"]}
+
+
+@app.get("/api/work-reports/history")
+async def get_my_work_reports_endpoint(user: dict = Depends(get_current_user_context)):
+    """Riwayat laporan kerjaan MILIK SENDIRI -- karyawan bisa lihat semua
+    laporan yang pernah dia kirim sebelumnya."""
+    return {"reports": db.get_user_work_reports(user["email"])}
+
+
+@app.get("/api/team/users/{email}/work-reports")
+async def user_work_reports_endpoint(email: str, user: dict = Depends(get_current_user_context)):
+    """Dipakai Admin/SuperAdmin di Direktori Karyawan untuk lihat riwayat
+    laporan kerjaan bawahannya."""
+    require_team_view(user, email)
+    return {"reports": db.get_user_work_reports(email)}

@@ -1,8 +1,14 @@
-// API URL dinamis (Vercel otomatis pakai domain produksi kosong, lokal pakai localhost)
+// API URL dinamis:
+// - Lokal (localhost): langsung ke FastAPI lokal di :8000
+// - Produksi: ke backend Railway lewat NEXT_PUBLIC_API_URL (di-set di
+//   Vercel Project Settings -> Environment Variables), TANPA trailing slash.
+//   Kalau env var belum di-set, fallback "" (relatif) -- ini akan gagal
+//   sejak backend dipindah ke Railway (bukan lagi serverless function di
+//   Vercel yang sama), jadi WAJIB diisi untuk build produksi.
 export const API_URL =
     typeof window !== "undefined" && window.location.hostname === "localhost"
         ? "http://localhost:8000"
-        : "";
+        : (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
 export interface KosUser {
     email: string;

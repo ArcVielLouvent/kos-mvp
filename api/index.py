@@ -9,13 +9,41 @@ import urllib.parse
 
 import pandas as pd
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import ai
-from . import auth
-from . import db
+# Dukung dua cara jalan: sebagai package "api" (mis. `uvicorn api.index:app`
+# dari root repo) ATAU sebagai modul biasa saat root directory Railway
+# diarahkan langsung ke folder api/ (mis. `uvicorn index:app`).
+try:
+    from . import ai, auth, db
+except ImportError:  # dijalankan langsung dari dalam folder api/
+    import ai
+    import auth
+    import db
 
 app = FastAPI()
+
+# ====================================================================
+# CORS -- WAJIB karena frontend (Vercel) dan backend (Railway) sekarang
+# berbeda domain. Set ALLOWED_ORIGINS di Railway, contoh:
+# "https://kos-mvp.vercel.app,https://app.kuroteklab.com"
+# Kalau env var kosong, fallback "*" (longgar, cuma untuk dev/awal setup --
+# SEGERA diisi origin asli begitu domain Vercel final sudah ada).
+_allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", "").strip()
+_allowed_origins = (
+    [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
+    if _allowed_origins_env
+    else ["*"]
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(auth.router)
 
 PAGE_SIZE_DEFAULT = 20
@@ -51,6 +79,12 @@ class BulkDeleteRequest(BaseModel):
 class MoveDocumentRequest(BaseModel):
     doc_id: str
     new_path: str
+
+
+class BulkMoveRequest(BaseModel):
+    folders: List[str] = []
+    docs: List[str] = []
+    destination: str
 
 
 class YouTubeRequest(BaseModel):
@@ -578,6 +612,29 @@ async def move_document_endpoint(
     try:
         db.move_document(req.doc_id, req.new_path, user["company_id"])
         return {"status": "success", "message": "Dokumen berhasil dipindahkan."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/documents/bulk-move")
+async def bulk_move_endpoint(
+    req: BulkMoveRequest, user: dict = Depends(get_current_user_context)
+):
+    """Pindahkan banyak folder & dokumen sekaligus ke satu folder tujuan --
+    ala 'Move to' di Google Drive/OneDrive. Dipakai oleh tombol 'Pindahkan
+    Terpilih' di File Manager setelah pilih beberapa item (termasuk Pilih
+    Semua)."""
+    require_write(user)
+    try:
+        dest = normalize_folder(req.destination)
+        for fpath in req.folders:
+            db.move_folder_cascade(user["company_id"], fpath, dest)
+        for did in req.docs:
+            db.move_document(did, dest, user["company_id"])
+        total = len(req.folders) + len(req.docs)
+        return {"status": "success", "message": f"{total} item berhasil dipindahkan ke {dest}."}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

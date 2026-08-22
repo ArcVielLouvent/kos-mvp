@@ -1,9 +1,10 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { Plus, Send, Sparkles, Bot, Loader2, Download, AlertTriangle, ExternalLink, Copy, Check, Pencil, Trash2, X } from "lucide-react";
+import { Plus, Send, Sparkles, Bot, Loader2, Download, AlertTriangle, ExternalLink, Copy, Check, Pencil, Trash2, X, Eye } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { DocumentBadge } from "@/components/DocumentBadge";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { cn } from "@/lib/utils";
 import { apiJson, downloadBase64, getStoredUser } from "@/lib/api";
 
@@ -56,7 +57,7 @@ function extractYoutubeId(url: string): string | null {
     }
 }
 
-function SourceLink({ src }: { src: Source }) {
+function SourceLink({ src, onPreview }: { src: Source; onPreview: (f: { title: string; file_url: string }) => void }) {
     const isYoutube = src.metadata?.tipe_file === "Video YouTube";
 
     if (isYoutube && src.file_url) {
@@ -89,16 +90,25 @@ function SourceLink({ src }: { src: Source }) {
     if (!src.file_url) return null;
 
     return (
-        <a
-            href={src.file_url}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-2 flex items-center gap-2 rounded-[var(--radius-control)] border border-navy-100 bg-navy-50 px-2.5 py-2 text-xs font-medium text-navy-900 hover:bg-navy-100"
-        >
+        <div className="mt-2 flex items-center gap-2 rounded-[var(--radius-control)] border border-navy-100 bg-navy-50 px-2.5 py-2 text-xs font-medium text-navy-900">
             <DocumentBadge type={src.metadata?.tipe_file || "default"} size="sm" />
-            <span className="truncate">Unduh: {src.title}</span>
-            <ExternalLink className="h-3 w-3 shrink-0" />
-        </a>
+            <span className="min-w-0 flex-1 truncate">{src.title}</span>
+            <button
+                type="button"
+                onClick={() => onPreview({ title: src.title, file_url: src.file_url! })}
+                className="flex shrink-0 items-center gap-1 rounded border border-navy-200 bg-white px-2 py-1 text-2xs font-semibold text-navy-900 hover:bg-navy-100"
+            >
+                <Eye className="h-3 w-3" /> Lihat
+            </button>
+            <a
+                href={src.file_url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex shrink-0 items-center gap-1 rounded border border-navy-200 bg-white px-2 py-1 text-2xs font-semibold text-navy-900 hover:bg-navy-100"
+            >
+                <ExternalLink className="h-3 w-3" /> Buka
+            </a>
+        </div>
     );
 }
 
@@ -182,6 +192,7 @@ export default function ChatPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [renamingId, setRenamingId] = useState<string | null>(null);
     const [renameValue, setRenameValue] = useState("");
+    const [previewFile, setPreviewFile] = useState<{ title: string; file_url: string } | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -485,7 +496,7 @@ export default function ChatPage() {
                                         )}
 
                                         {(m.sources || []).map((src) => (
-                                            <SourceLink key={src.id} src={src} />
+                                            <SourceLink key={src.id} src={src} onPreview={setPreviewFile} />
                                         ))}
 
                                         <div className="mt-1">
@@ -532,6 +543,7 @@ export default function ChatPage() {
                     </div>
                 </div>
             </div>
+            {previewFile && <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
         </div>
     );
 }

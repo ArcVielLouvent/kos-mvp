@@ -3,8 +3,11 @@ import { useState, useEffect } from "react";
 import {
   Folder, Home, Download, Eye, Upload, Plus, Video, Trash2, Pencil, Move,
   ChevronLeft, ChevronRight, ArrowLeft, ChevronRight as Chevron, FolderOpen,
+  X, CheckSquare, Square,
 } from "lucide-react";
 import { DocumentBadge } from "@/components/DocumentBadge";
+import { FolderTreePicker } from "@/components/FolderTreePicker";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
 import { apiFetch, apiJson } from "@/lib/api";
 
 const PAGE_SIZE = 20;
@@ -38,6 +41,9 @@ export function FileManagerBody({ initialPath = "/" }: { initialPath?: string })
 
   const [selectedFolders, setSelectedFolders] = useState<Set<string>>(new Set());
   const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set());
+  const [previewFile, setPreviewFile] = useState<{ title: string; file_url: string } | null>(null);
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [moveDestination, setMoveDestination] = useState("/");
 
   const loadFiles = async () => {
     setIsLoading(true);
@@ -223,6 +229,46 @@ export function FileManagerBody({ initialPath = "/" }: { initialPath?: string })
     });
   };
 
+  const allSelected =
+    (data.folders.length > 0 || data.files.length > 0) &&
+    data.folders.every((f: any) => selectedFolders.has(f.path)) &&
+    data.files.every((f: any) => selectedDocs.has(f.id));
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedFolders(new Set());
+      setSelectedDocs(new Set());
+    } else {
+      setSelectedFolders(new Set(data.folders.map((f: any) => f.path)));
+      setSelectedDocs(new Set(data.files.map((f: any) => f.id)));
+    }
+  };
+
+  const handleBulkMove = async () => {
+    const total = selectedFolders.size + selectedDocs.size;
+    if (total === 0) return;
+    setIsProcessing(true);
+    try {
+      const result = await apiJson("/api/documents/bulk-move", {
+        method: "POST",
+        body: JSON.stringify({
+          folders: Array.from(selectedFolders),
+          docs: Array.from(selectedDocs),
+          destination: moveDestination,
+        }),
+      });
+      setActionMsg(result.message);
+      setSelectedFolders(new Set());
+      setSelectedDocs(new Set());
+      setShowMoveModal(false);
+      loadFiles();
+    } catch (e: any) {
+      setActionMsg(e.message || "Gagal memindahkan item terpilih.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const totalSelected = selectedFolders.size + selectedDocs.size;
   const totalPages = Math.max(1, Math.ceil((data.total || 0) / PAGE_SIZE));
   const crumbs = currentPath.split("/").filter(Boolean);
@@ -326,14 +372,62 @@ export function FileManagerBody({ initialPath = "/" }: { initialPath?: string })
         </div>
       )}
 
-      {data.writable && totalSelected > 0 && (
-        <div className="flex items-center justify-between gap-4 rounded-[var(--radius-card)] border border-red-100 bg-red-50 p-3">
-          <span className="text-xs font-semibold text-red-700">{totalSelected} item terpilih</span>
-          <button onClick={handleBulkDelete} className="flex items-center gap-1.5 rounded bg-red-600 px-3 py-1.5 text-2xs font-bold text-white hover:bg-red-700">
-            <Trash2 className="h-3.5 w-3.5" /> Hapus Terpilih
+      {data.writable && (data.folders.length > 0 || data.files.length > 0) && (
+        <div className="flex items-center justify-between gap-4">
+          <button
+            onClick={toggleSelectAll}
+            className="flex items-center gap-1.5 rounded-[var(--radius-control)] border border-navy-100 bg-white px-3 py-1.5 text-2xs font-semibold text-ink-muted hover:bg-navy-50"
+          >
+            {allSelected ? <CheckSquare className="h-3.5 w-3.5 text-navy-900" /> : <Square className="h-3.5 w-3.5" />}
+            {allSelected ? "Batalkan Semua" : "Pilih Semua"}
           </button>
+
+          {totalSelected > 0 && (
+            <div className="flex flex-1 items-center justify-between gap-4 rounded-[var(--radius-card)] border border-navy-200 bg-navy-50 p-3">
+              <span className="text-xs font-semibold text-navy-900">{totalSelected} item terpilih</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setMoveDestination(currentPath); setShowMoveModal(true); }}
+                  className="flex items-center gap-1.5 rounded bg-navy-900 px-3 py-1.5 text-2xs font-bold text-white hover:bg-navy-800"
+                >
+                  <Move className="h-3.5 w-3.5" /> Pindahkan Terpilih
+                </button>
+                <button onClick={handleBulkDelete} className="flex items-center gap-1.5 rounded bg-red-600 px-3 py-1.5 text-2xs font-bold text-white hover:bg-red-700">
+                  <Trash2 className="h-3.5 w-3.5" /> Hapus Terpilih
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {showMoveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowMoveModal(false)}>
+          <div className="w-full max-w-md space-y-3 rounded-[var(--radius-card)] bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-ink">Pindahkan {totalSelected} item ke...</h3>
+              <button onClick={() => setShowMoveModal(false)} className="rounded-full p-1 text-ink-muted hover:bg-navy-50">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <FolderTreePicker value={moveDestination} onChange={setMoveDestination} />
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => setShowMoveModal(false)} className="rounded border border-navy-100 px-3 py-1.5 text-xs font-medium text-ink-muted hover:bg-navy-50">
+                Batal
+              </button>
+              <button
+                onClick={handleBulkMove}
+                disabled={isProcessing}
+                className="rounded bg-navy-900 px-4 py-1.5 text-xs font-semibold text-white hover:bg-navy-800 disabled:opacity-50"
+              >
+                Pindahkan ke sini
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {previewFile && <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
 
       {isLoading ? (
         <p className="animate-pulse text-sm text-ink-muted">Menyinkronkan data cloud...</p>
@@ -400,9 +494,9 @@ export function FileManagerBody({ initialPath = "/" }: { initialPath?: string })
                     <div className="flex items-center justify-end gap-1.5">
                       {f.file_url && (
                         <>
-                          <a href={f.file_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded border border-navy-100 bg-white px-2.5 py-1 text-2xs font-semibold text-ink-muted hover:bg-navy-50">
+                          <button onClick={() => setPreviewFile({ title: f.title, file_url: f.file_url })} className="flex items-center gap-1 rounded border border-navy-100 bg-white px-2.5 py-1 text-2xs font-semibold text-ink-muted hover:bg-navy-50">
                             <Eye className="h-3 w-3" /> Lihat
-                          </a>
+                          </button>
                           <a href={f.file_url} download={f.title} className="flex items-center gap-1 rounded border border-navy-100 bg-white px-2.5 py-1 text-2xs font-semibold text-ink-muted hover:bg-navy-50">
                             <Download className="h-3 w-3" /> Unduh
                           </a>

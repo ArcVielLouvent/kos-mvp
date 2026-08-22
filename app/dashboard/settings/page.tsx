@@ -33,6 +33,34 @@ export default function SettingsPage() {
         }
     };
 
+    // Slider di-drag bebas dulu di UI (state lokal, tanpa nembak API tiap
+    // gerakan mouse) -- baru di-commit ke backend saat user lepas slider
+    // (onMouseUp/onTouchEnd/onChange final), supaya tidak spam PATCH.
+    const [deadlineDraft, setDeadlineDraft] = useState<number | null>(null);
+    useEffect(() => {
+        if (settings && deadlineDraft === null) {
+            setDeadlineDraft(settings.attendance_deadline_hour ?? 24);
+        }
+    }, [settings]);
+
+    const commitDeadline = async (value: number) => {
+        if (!settings) return;
+        const prev = settings.attendance_deadline_hour;
+        setSettings({ ...settings, attendance_deadline_hour: value }); // optimistic
+        setIsSaving(true);
+        try {
+            await apiJson("/api/settings/company", {
+                method: "PATCH",
+                body: JSON.stringify({ attendance_deadline_hour: value }),
+            });
+        } catch {
+            setSettings({ ...settings, attendance_deadline_hour: prev }); // rollback
+            setDeadlineDraft(prev);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     return (
         <div>
             <TopBar title="Pengaturan" description="Informasi workspace perusahaan." />
@@ -117,6 +145,40 @@ export default function SettingsPage() {
                                         }`}
                                     />
                                 </button>
+                            </div>
+
+                            <div className="border-t border-navy-50 pt-4">
+                                <div className="flex items-start gap-2.5">
+                                    <Clock className="mt-0.5 h-4 w-4 text-ink-faint" />
+                                    <div className="flex-1">
+                                        <div className="flex items-center justify-between">
+                                            <p className="text-sm font-medium text-ink">Batas Waktu Lapor Harian</p>
+                                            <span className="rounded-full bg-navy-900 px-2.5 py-0.5 text-2xs font-bold text-white">
+                                                {deadlineDraft ?? settings.attendance_deadline_hour ?? 24}:00
+                                            </span>
+                                        </div>
+                                        <p className="mb-3 text-xs text-ink-faint">
+                                            Karyawan dianggap terlambat kalau belum isi Form Kehadiran/Lapor Kerjaan sebelum jam ini.
+                                        </p>
+                                        <input
+                                            type="range"
+                                            min={1}
+                                            max={24}
+                                            step={1}
+                                            value={deadlineDraft ?? settings.attendance_deadline_hour ?? 24}
+                                            onChange={(e) => setDeadlineDraft(Number(e.target.value))}
+                                            onMouseUp={(e) => commitDeadline(Number((e.target as HTMLInputElement).value))}
+                                            onTouchEnd={(e) => commitDeadline(Number((e.target as HTMLInputElement).value))}
+                                            disabled={isSaving}
+                                            className="h-2 w-full cursor-pointer appearance-none rounded-full bg-navy-100 accent-navy-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                        />
+                                        <div className="mt-1 flex justify-between text-2xs text-ink-faint">
+                                            <span>01:00</span>
+                                            <span>12:00</span>
+                                            <span>24:00</span>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}

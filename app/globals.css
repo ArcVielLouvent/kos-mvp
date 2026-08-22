@@ -70,3 +70,56 @@ select:focus-visible {
         transition-duration: 0.01ms !important;
     }
 }
+
+/* Slider (input[type=range]) -- style manual cross-browser karena
+   `appearance-none` menghilangkan thumb bawaan tanpa ini (thumb jadi
+   tidak kelihatan/tidak bisa di-drag di Chrome/Safari). Dipakai di
+   Pengaturan > Batas Waktu Lapor Harian. */
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--color-navy-100, #e2e8f0);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    margin-top: -7px;
+    height: 20px;
+    width: 20px;
+    border-radius: 9999px;
+    background: var(--color-navy-900, #0f172a);
+    border: 3px solid #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+    cursor: pointer;
+}
+
+input[type="range"]::-moz-range-track {
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--color-navy-100, #e2e8f0);
+}
+
+input[type="range"]::-moz-range-thumb {
+    height: 20px;
+    width: 20px;
+    border-radius: 9999px;
+    background: var(--color-navy-900, #0f172a);
+    border: 3px solid #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+    cursor: pointer;
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb {
+    cursor: not-allowed;
+}
+
+input[type="range"]:disabled::-moz-range-thumb {
+    cursor: not-allowed;
+}

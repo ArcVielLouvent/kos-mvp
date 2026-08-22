@@ -495,6 +495,69 @@ def rename_folder_cascade(company_id: str, old_path: str, new_name: str):
         ).execute()
 
 
+def move_folder_cascade(company_id: str, old_path: str, dest_parent_path: str):
+    """Pindahkan folder (dan seluruh isinya secara kaskade) ke bawah folder
+    tujuan lain -- beda dengan rename_folder_cascade yang cuma ganti nama
+    di tempat, ini mengganti parent-nya juga. Dipakai oleh fitur
+    'Pindahkan' ala Google Drive/OneDrive di File Manager."""
+    client = get_client()
+    old_path = normalize_folder(old_path)
+    dest_parent_path = normalize_folder(dest_parent_path)
+
+    parts = [p for p in old_path.split("/") if p]
+    if not parts:
+        return
+    folder_name = parts[-1]
+    new_path = dest_parent_path + folder_name + "/"
+
+    if new_path == old_path or new_path.startswith(old_path):
+        # Cegah memindahkan folder ke dalam dirinya sendiri (loop tak terhingga).
+        raise ValueError("Tidak bisa memindahkan folder ke dalam dirinya sendiri.")
+
+    create_folder(company_id, dest_parent_path)
+
+    folders = (
+        client.table("folders")
+        .select("path")
+        .eq("company_id", company_id)
+        .ilike("path", f"{old_path}%")
+        .execute()
+    )
+    for f in folders.data:
+        updated_path = f["path"].replace(old_path, new_path, 1)
+        client.table("folders").update({"path": updated_path}).eq("path", f["path"]).eq(
+            "company_id", company_id
+        ).execute()
+
+    docs = (
+        client.table("documents")
+        .select("id, folder_path")
+        .eq("company_id", company_id)
+        .ilike("folder_path", f"{old_path}%")
+        .execute()
+    )
+    for d in docs.data:
+        updated_path = d["folder_path"].replace(old_path, new_path, 1)
+        client.table("documents").update({"folder_path": updated_path}).eq(
+            "id", d["id"]
+        ).execute()
+
+    users = (
+        client.table("users")
+        .select("email, folder_access")
+        .eq("company_id", company_id)
+        .ilike("folder_access", f"{old_path}%")
+        .execute()
+    )
+    for u in users.data:
+        updated_path = u["folder_access"].replace(old_path, new_path, 1)
+        client.table("users").update({"folder_access": updated_path}).eq(
+            "email", u["email"]
+        ).execute()
+
+    create_folder(company_id, new_path)
+
+
 # ==========================================
 # DIREKTORI KARYAWAN (folder-scoped: admin lihat yang di bawah cakupannya)
 # ==========================================

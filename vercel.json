@@ -1,13 +1,3 @@
 {
-  "functions": {
-    "api/**/*.py": {
-      "maxDuration": 10
-    }
-  },
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/index.py"
-    }
-  ]
+  "framework": "nextjs"
 }

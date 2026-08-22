@@ -1069,3 +1069,500 @@ def get_recent_activity(company_id: str, limit: int = 8) -> list:
 
     activity.sort(key=lambda a: a["time"] or "", reverse=True)
     return activity[:limit]
+
+
+# ============================================================
+# FORM BUILDER -- Form Kehadiran & Lapor Kerjaan (digabung jadi satu,
+# ala Google Forms: field bisa diatur bebas, upload video/audio/dokumen
+# bisa wajib/opsional per field).
+# ============================================================
+def get_daily_template(company_id: str):
+    """Ambil template form harian aktif (is_daily=true, is_active=true).
+    Kalau belum pernah dibuat sama sekali, return None -- caller yang
+    memutuskan mau bikinin default atau bilang 'Admin belum atur form'."""
+    client = get_client()
+    r = (
+        client.table("form_templates")
+        .select("*")
+        .eq("company_id", company_id)
+        .eq("is_daily", True)
+        .eq("is_active", True)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    return r.data[0] if r.data else None
+
+
+def get_template_with_fields(template_id: str):
+    client = get_client()
+    tpl = client.table("form_templates").select("*").eq("id", template_id).execute()
+    if not tpl.data:
+        return None
+    fields = (
+        client.table("form_fields")
+        .select("*")
+        .eq("template_id", template_id)
+        .order("sort_order")
+        .execute()
+    )
+    return {**tpl.data[0], "fields": fields.data}
+
+
+def save_daily_template(company_id: str, created_by: str, name: str, description: str, fields: list):
+    """Simpan (buat/replace) template form harian + field-fieldnya sekaligus.
+    Field lama ditimpa total supaya form-builder-nya sesederhana mungkin di
+    sisi frontend (kirim seluruh daftar field final, bukan diff)."""
+    client = get_client()
+
+    existing = get_daily_template(company_id)
+    if existing:
+        template_id = existing["id"]
+        client.table("form_templates").update({
+            "name": name,
+            "description": description,
+            "updated_at": "now()",
+        }).eq("id", template_id).execute()
+        client.table("form_fields").delete().eq("template_id", template_id).execute()
+    else:
+        created = (
+            client.table("form_templates")
+            .insert({
+                "company_id": company_id,
+                "name": name,
+                "description": description,
+                "is_daily": True,
+                "is_active": True,
+                "created_by": created_by,
+            })
+            .execute()
+        )
+        template_id = created.data[0]["id"]
+
+    rows = []
+    for i, f in enumerate(fields):
+        rows.append({
+            "template_id": template_id,
+            "label": f["label"],
+            "field_type": f.get("field_type", "short_text"),
+            "options": f.get("options") or [],
+            "file_kind": f.get("file_kind") or "any",
+            "is_required": bool(f.get("is_required", False)),
+            "sort_order": i,
+        })
+    if rows:
+        client.table("form_fields").insert(rows).execute()
+
+    return get_template_with_fields(template_id)
+
+
+def get_today_submission(template_id: str, user_email: str, company_id: str):
+    client = get_client()
+    r = (
+        client.table("form_submissions")
+        .select("*")
+        .eq("template_id", template_id)
+        .eq("user_email", user_email.strip().lower())
+        .eq("company_id", company_id)
+        .eq("submission_date", _today_str())
+        .execute()
+    )
+    if not r.data:
+        return None
+    submission = r.data[0]
+    answers = (
+        client.table("form_submission_answers")
+        .select("*")
+        .eq("submission_id", submission["id"])
+        .execute()
+    )
+    submission["answers"] = answers.data
+    return submission
+
+
+def submit_daily_form(
+    template_id: str, user_email: str, company_id: str, answers: list, deadline_hour: int = 24,
+):
+    """Idempotent per hari (unique constraint template+user+tanggal) --
+    kalau sudah pernah isi hari ini, jawaban lama ditimpa (mengganti isian,
+    bukan bikin submission dobel)."""
+    client = get_client()
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    status = "late" if now.hour >= deadline_hour else "on_time"
+
+    existing = (
+        client.table("form_submissions")
+        .select("id")
+        .eq("template_id", template_id)
+        .eq("user_email", user_email.strip().lower())
+        .eq("company_id", company_id)
+        .eq("submission_date", _today_str())
+        .execute()
+    )
+    if existing.data:
+        submission_id = existing.data[0]["id"]
+        client.table("form_submission_answers").delete().eq("submission_id", submission_id).execute()
+        client.table("form_submissions").update({"status": status, "submitted_at": "now()"}).eq(
+            "id", submission_id
+        ).execute()
+    else:
+        created = (
+            client.table("form_submissions")
+            .insert({
+                "template_id": template_id,
+                "company_id": company_id,
+                "user_email": user_email.strip().lower(),
+                "submission_date": _today_str(),
+                "status": status,
+            })
+            .execute()
+        )
+        submission_id = created.data[0]["id"]
+
+    rows = []
+    for a in answers:
+        rows.append({
+            "submission_id": submission_id,
+            "field_id": a["field_id"],
+            "value_text": a.get("value_text"),
+            "file_url": a.get("file_url"),
+            "file_kind": a.get("file_kind"),
+        })
+    if rows:
+        client.table("form_submission_answers").insert(rows).execute()
+
+    return get_today_submission(template_id, user_email, company_id)
+
+
+def get_submission_status_today(company_id: str, template_id: str) -> dict:
+    """Dipakai Dashboard Owner/atasan -- gabungan dari get_attendance_status_today
+    lama: siapa SUDAH dan BELUM isi form hari ini. SuperAdmin dikecualikan
+    dari daftar 'belum' (tidak wajib lapor), tetap boleh isi kalau mau."""
+    client = get_client()
+    today = _today_str()
+
+    users_r = (
+        client.table("users")
+        .select("email, role, position_title, manager_email")
+        .eq("company_id", company_id)
+        .neq("role", "SuperAdmin")
+        .execute()
+    )
+    subs_r = (
+        client.table("form_submissions")
+        .select("user_email, status, submitted_at")
+        .eq("company_id", company_id)
+        .eq("template_id", template_id)
+        .eq("submission_date", today)
+        .execute()
+    )
+    by_email = {s["user_email"]: s for s in subs_r.data}
+
+    sudah, belum = [], []
+    for u in users_r.data:
+        sub = by_email.get(u["email"])
+        if sub:
+            sudah.append({**u, "status": sub["status"], "submitted_at": sub["submitted_at"]})
+        else:
+            belum.append(u)
+
+    return {"sudah": sudah, "belum": belum, "total": len(users_r.data)}
+
+
+def get_user_submissions(user_email: str, limit: int = 50):
+    """Riwayat isian form satu karyawan (menggantikan get_user_reports lama
+    untuk halaman Direktori Karyawan / Riwayat)."""
+    client = get_client()
+    subs_r = (
+        client.table("form_submissions")
+        .select("*")
+        .eq("user_email", user_email.strip().lower())
+        .order("submission_date", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    submissions = subs_r.data
+    ids = [s["id"] for s in submissions]
+    if ids:
+        answers_r = (
+            client.table("form_submission_answers")
+            .select("*")
+            .in_("submission_id", ids)
+            .execute()
+        )
+        by_submission: dict = {}
+        for a in answers_r.data:
+            by_submission.setdefault(a["submission_id"], []).append(a)
+        for s in submissions:
+            s["answers"] = by_submission.get(s["id"], [])
+    return submissions
+
+
+def upload_form_file(company_id: str, user_email: str, field_id: str, file_bytes: bytes, filename: str) -> str:
+    client = get_client()
+    storage_path = f"{company_id}/form-submissions/{user_email}/{_today_str()}/{field_id}_{filename}"
+    client.storage.from_("company-files").upload(
+        storage_path, file_bytes, {"upsert": "true"}
+    )
+    signed = client.storage.from_("company-files").create_signed_url(
+        storage_path, 3600 * 24 * 30
+    )
+    return signed.get("signedURL") or signed.get("signed_url")
+
+
+# ============================================================
+# AKSES BERJENJANG -- rantai atasan (bukan cuma 1 level), dibangun dari
+# manager_email yang sudah ada di tabel users. Dipakai untuk eskalasi
+# notifikasi berantai: bawahan -> atasan langsung -> atasan dari atasan -> dst.
+# ============================================================
+def get_manager_chain(email: str, max_depth: int = 10) -> list:
+    """Balikin daftar email atasan dari yang paling dekat sampai paling
+    atas, berhenti kalau mentok (tidak ada manager_email lagi) atau kalau
+    ketemu loop (data salah input) supaya tidak infinite loop."""
+    client = get_client()
+    chain = []
+    seen = {email.strip().lower()}
+    current = email.strip().lower()
+    for _ in range(max_depth):
+        r = client.table("users").select("manager_email").eq("email", current).execute()
+        if not r.data:
+            break
+        manager = r.data[0].get("manager_email")
+        if not manager or manager in seen:
+            break
+        chain.append(manager)
+        seen.add(manager)
+        current = manager
+    return chain
+
+
+# ============================================================
+# NOTIFIKASI -- pengingat belum isi form + eskalasi berjenjang ke rantai
+# atasan (mengikuti company_settings.notify_atasan_enabled).
+# ============================================================
+def create_notification(
+    company_id: str, recipient_email: str, notif_type: str, title: str, message: str,
+    related_user_email: str = None, related_date: str = None,
+):
+    """Idempotent (select-then-insert, sama gaya dengan check_in_attendance)
+    -- 1 notifikasi per (recipient, tipe, related_user, tanggal), aman
+    dipanggil berulang tanpa nge-spam kotak masuk kalau job pengingat
+    jalan tiap beberapa jam."""
+    client = get_client()
+    recipient_email = recipient_email.strip().lower()
+    related_user_email = (related_user_email or "").strip().lower() or None
+    related_date = related_date or _today_str()
+
+    q = (
+        client.table("notifications")
+        .select("id")
+        .eq("company_id", company_id)
+        .eq("recipient_email", recipient_email)
+        .eq("type", notif_type)
+        .eq("related_date", related_date)
+    )
+    q = q.eq("related_user_email", related_user_email) if related_user_email else q.is_("related_user_email", "null")
+    if q.execute().data:
+        return  # sudah ada notifikasi yang sama hari ini, jangan dobel
+
+    client.table("notifications").insert({
+        "company_id": company_id,
+        "recipient_email": recipient_email,
+        "type": notif_type,
+        "title": title,
+        "message": message,
+        "related_user_email": related_user_email,
+        "related_date": related_date,
+    }).execute()
+
+
+def list_notifications(recipient_email: str, unread_only: bool = False, limit: int = 30):
+    client = get_client()
+    q = (
+        client.table("notifications")
+        .select("*")
+        .eq("recipient_email", recipient_email.strip().lower())
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    if unread_only:
+        q = q.eq("is_read", False)
+    return q.execute().data
+
+
+def count_unread_notifications(recipient_email: str) -> int:
+    client = get_client()
+    r = (
+        client.table("notifications")
+        .select("id", count="exact")
+        .eq("recipient_email", recipient_email.strip().lower())
+        .eq("is_read", False)
+        .execute()
+    )
+    return r.count or 0
+
+
+def mark_notification_read(notif_id: str, recipient_email: str):
+    client = get_client()
+    client.table("notifications").update({"is_read": True}).eq("id", notif_id).eq(
+        "recipient_email", recipient_email.strip().lower()
+    ).execute()
+
+
+def mark_all_notifications_read(recipient_email: str):
+    client = get_client()
+    client.table("notifications").update({"is_read": True}).eq(
+        "recipient_email", recipient_email.strip().lower()
+    ).eq("is_read", False).execute()
+
+
+def run_late_submission_check(company_id: str) -> dict:
+    """Job pengingat -- dipanggil berulang tiap beberapa jam (lewat cron
+    Railway atau trigger manual Owner/Admin). Kirim reminder ke karyawan
+    yang belum isi form hari ini SETELAH lewat attendance_deadline_hour,
+    dan kalau notify_atasan_enabled aktif, eskalasi berantai ke SELURUH
+    rantai atasannya (bukan cuma atasan langsung)."""
+    settings = get_company_settings(company_id)
+    template = get_daily_template(company_id)
+    if not template:
+        return {"checked": 0, "reminded": 0, "escalated": 0, "note": "Belum ada form harian yang diatur."}
+
+    from datetime import datetime, timezone
+    now_hour = datetime.now(timezone.utc).hour
+    deadline = settings.get("attendance_deadline_hour", 24)
+    if now_hour < deadline:
+        return {"checked": 0, "reminded": 0, "escalated": 0, "note": "Belum lewat batas waktu hari ini."}
+
+    status = get_submission_status_today(company_id, template["id"])
+    reminded, escalated = 0, 0
+
+    for u in status["belum"]:
+        email = u["email"]
+        nama = u.get("position_title") or email
+
+        create_notification(
+            company_id, email, "reminder",
+            title="Belum isi Form Kehadiran/Lapor Kerjaan hari ini",
+            message=f"Kamu belum mengisi form harian hari ini. Segera isi ya, {nama}.",
+            related_user_email=email,
+        )
+        reminded += 1
+
+        if settings.get("notify_atasan_enabled"):
+            for manager_email in get_manager_chain(email):
+                create_notification(
+                    company_id, manager_email, "escalation",
+                    title="Bawahan belum isi form harian",
+                    message=f"{email} belum mengisi Form Kehadiran/Lapor Kerjaan hari ini.",
+                    related_user_email=email,
+                )
+                escalated += 1
+
+    return {"checked": status["total"], "reminded": reminded, "escalated": escalated}
+
+
+# ============================================================
+# POIN PELANGGARAN -- SKEMA SAJA. Klien belum minta fitur ini diaktifkan
+# (baru rencana), jadi belum ada endpoint/UI yang dipasang untuk ini.
+# Fungsi di bawah disiapkan supaya nanti tinggal dicolokin, tanpa migrasi
+# ulang, begitu dikonfirmasi ke klien.
+# ============================================================
+def add_violation_point(company_id: str, user_email: str, points: int, reason: str, given_by: str):
+    client = get_client()
+    client.table("violation_points").insert({
+        "company_id": company_id,
+        "user_email": user_email.strip().lower(),
+        "points": points,
+        "reason": reason,
+        "given_by": given_by,
+    }).execute()
+
+
+def get_user_violation_points(user_email: str) -> int:
+    client = get_client()
+    r = (
+        client.table("violation_points")
+        .select("points")
+        .eq("user_email", user_email.strip().lower())
+        .execute()
+    )
+    return sum(row["points"] for row in r.data)
+
+
+# ============================================================
+# BROADCAST PENGUMUMAN VIA EMAIL
+# ============================================================
+def send_email(to_email: str, subject: str, body: str) -> bool:
+    """Kirim 1 email lewat SMTP (env var SMTP_HOST/PORT/USER/PASS/FROM di
+    Railway). Return False (bukan raise) kalau gagal supaya 1 email gagal
+    tidak menggagalkan broadcast ke seluruh perusahaan."""
+    import smtplib
+    from email.mime.text import MIMEText
+
+    host = os.environ.get("SMTP_HOST")
+    port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_pass = os.environ.get("SMTP_PASS")
+    from_addr = os.environ.get("SMTP_FROM", smtp_user or "")
+
+    if not host or not smtp_user or not smtp_pass:
+        return False
+
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["To"] = to_email
+
+    try:
+        with smtplib.SMTP(host, port, timeout=15) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_addr, [to_email], msg.as_string())
+        return True
+    except Exception:
+        return False
+
+
+def send_broadcast_announcement(
+    company_id: str, sender_email: str, subject: str, body: str, target_scope: str = "/",
+) -> dict:
+    client = get_client()
+    q = client.table("users").select("email").eq("company_id", company_id)
+    if target_scope and target_scope != "/":
+        q = q.like("folder_access", f"{target_scope}%")
+    recipients = [u["email"] for u in q.execute().data]
+
+    sent_count = 0
+    for email in recipients:
+        if send_email(email, subject, body):
+            sent_count += 1
+        create_notification(
+            company_id, email, "broadcast",
+            title=subject, message=body,
+            related_user_email=sender_email, related_date=_today_str(),
+        )
+
+    client.table("announcements").insert({
+        "company_id": company_id,
+        "sender_email": sender_email,
+        "subject": subject,
+        "body": body,
+        "target_scope": target_scope,
+        "recipient_count": sent_count,
+    }).execute()
+
+    return {"recipients": len(recipients), "emails_sent": sent_count}
+
+
+def list_announcements(company_id: str, limit: int = 30):
+    client = get_client()
+    r = (
+        client.table("announcements")
+        .select("*")
+        .eq("company_id", company_id)
+        .order("sent_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return r.data

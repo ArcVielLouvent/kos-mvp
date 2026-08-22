@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
+import { NotificationBell } from "@/components/NotificationBell";
 import { getStoredUser, KosUser } from "@/lib/api";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -43,7 +44,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 companyName={user?.company_name || "Workspace Perusahaan"}
             />
 
-            <main className="flex-1 overflow-y-auto bg-[#fafafa]">
+            <main className="relative flex-1 overflow-y-auto bg-[#fafafa]">
+                <NotificationBell />
                 {children}
             </main>
         </div>

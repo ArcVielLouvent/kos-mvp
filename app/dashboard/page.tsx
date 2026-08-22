@@ -37,7 +37,7 @@ export default function DashboardPage() {
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        apiJson("/api/dashboard/attendance-status")
+        apiJson("/api/dashboard/submission-status")
             .then(setAttendanceStatus)
             .catch(() => setAttendanceStatus(null));
     }, []);
@@ -155,7 +155,7 @@ export default function DashboardPage() {
                                                 <CalendarCheck className="h-4 w-4" />
                                             </span>
                                             <p className="text-sm font-medium text-ink">
-                                                Kehadiran hari ini: {attendanceStatus.sudah.length}/{attendanceStatus.total} sudah absen
+                                                Form harian: {attendanceStatus.sudah.length}/{attendanceStatus.total} sudah isi
                                             </p>
                                         </div>
                                         {attendanceStatus.belum.length > 0 && (
@@ -172,6 +172,12 @@ export default function DashboardPage() {
                                                     {u.position_title ? `${u.position_title} -- ` : ""}{u.email}
                                                 </div>
                                             ))}
+                                            <button
+                                                onClick={() => apiJson("/api/notifications/run-check", { method: "POST" }).catch(() => {})}
+                                                className="mt-1 text-2xs font-semibold text-navy-700 hover:underline"
+                                            >
+                                                Kirim pengingat sekarang
+                                            </button>
                                         </div>
                                     )}
                                 </div>

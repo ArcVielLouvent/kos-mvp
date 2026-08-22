@@ -29,7 +29,36 @@ function). Database tetap Supabase (Postgres terkelola) -- tidak pindah.
 
 Tidak berubah -- tetap jalankan FastAPI lokal (`uvicorn api.index:app --reload` dari root repo) di `:8000`, dan `npm run dev` untuk Next.js. `lib/api.ts` otomatis pakai `http://localhost:8000` saat hostname `localhost`.
 
+## 4. Migrasi database (Scope C -- form dinamis, notifikasi, broadcast)
+
+Sebelum deploy kode baru ini, jalankan `api/migration_scope_c.sql` di
+Supabase SQL Editor (aman dijalankan ulang, semua pakai `IF NOT EXISTS`).
+Isinya: tabel form builder (`form_templates`, `form_fields`,
+`form_submissions`, `form_submission_answers`), notifikasi
+(`notifications`), poin pelanggaran -- skema saja, belum aktif di UI
+(`violation_points`), dan broadcast pengumuman (`announcements`).
+
+## 5. Email broadcast (opsional, tapi disarankan diisi)
+
+Tambahkan di Railway Variables kalau mau broadcast pengumuman benar-benar
+terkirim lewat email (kalau kosong, pengumuman tetap masuk sebagai
+notifikasi dalam aplikasi, cuma email-nya nggak jalan):
+- `SMTP_HOST`, `SMTP_PORT` (default 587), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+
+## 6. Job pengingat otomatis (belum di-otomatisasi penuh)
+
+Endpoint `POST /api/notifications/run-check` aman dipanggil berkali-kali
+(idempotent) dan mengecek siapa yang belum isi form hari ini setelah lewat
+jam batas waktu di Pengaturan, lalu eskalasi ke rantai atasan kalau
+`notify_atasan_enabled` aktif. Saat ini dipicu manual lewat tombol
+"Kirim pengingat sekarang" di Dashboard -- kalau mau benar-benar otomatis
+tiap beberapa jam, tambahkan Railway Cron Job yang hit endpoint ini
+(butuh service account/token khusus dulu, karena endpoint ini pakai auth
+header X-User-Email biasa -- ini bagian yang perlu didiskusikan lagi kalau
+mau full-otomatis).
+
+
 ## Catatan
 
 - `api/app.py` (Streamlit) adalah versi lama, sudah tidak dipakai di produksi -- dibiarkan di repo cuma sebagai referensi, boleh dihapus kapan saja kalau sudah yakin tidak perlu rollback ke sana.
-- File besar (upload dokumen/media) tetap masuk ke Supabase Storage lewat `db.py`, jalur ini tidak berubah.
+- File besar (upload dokumen/media/form) tetap masuk ke Supabase Storage lewat `db.py`, jalur ini tidak berubah.

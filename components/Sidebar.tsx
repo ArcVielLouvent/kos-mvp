@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, MessageSquare, FolderTree, Users, Settings, User, LogOut, PanelLeftClose, PanelLeftOpen, Upload, CalendarCheck } from "lucide-react";
+import { LayoutDashboard, MessageSquare, FolderTree, Users, Settings, User, LogOut, PanelLeftClose, PanelLeftOpen, Upload, CalendarCheck, Megaphone } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Sidebar({ role, userEmail, companyName }: { role: string; userEmail: string; companyName: string }) {
@@ -35,6 +35,7 @@ export function Sidebar({ role, userEmail, companyName }: { role: string; userEm
     { name: "Kehadiran", href: "/dashboard/attendance", icon: CalendarCheck },
     ...(!isAdminTier ? [{ name: "Upload Dokumen", href: "/dashboard/upload", icon: Upload }] : []),
     ...(isAdminTier ? [{ name: "Manajemen Tim", href: "/dashboard/team", icon: Users }] : []),
+    ...(isAdminTier ? [{ name: "Broadcast", href: "/dashboard/announcements", icon: Megaphone }] : []),
   ];
 
   return (

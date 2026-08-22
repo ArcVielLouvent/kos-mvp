@@ -1225,3 +1225,210 @@ async def dashboard_endpoint(user: dict = Depends(get_current_user_context)):
             ],
             "recent": [],
         }
+
+
+# ====================================================================
+# FORM BUILDER -- Form Kehadiran & Lapor Kerjaan (digabung jadi satu,
+# ala Google Forms). Mengganti /api/attendance/* dan /api/reports lama
+# sebagai jalur utama, tapi endpoint lama TETAP dibiarkan aktif supaya
+# histori lama tidak hilang / tidak ada breaking change mendadak.
+# ====================================================================
+class FormFieldInput(BaseModel):
+    label: str
+    field_type: str = "short_text"  # short_text | long_text | number | date | select | checkbox | file
+    options: List[str] = []
+    file_kind: Optional[str] = "any"  # video | audio | document | any
+    is_required: bool = False
+
+
+class SaveFormTemplateRequest(BaseModel):
+    name: str = "Form Kehadiran & Lapor Kerjaan"
+    description: Optional[str] = None
+    fields: List[FormFieldInput] = []
+
+
+class FormAnswerInput(BaseModel):
+    field_id: str
+    value_text: Optional[str] = None
+    file_url: Optional[str] = None
+    file_kind: Optional[str] = None
+
+
+class SubmitFormRequest(BaseModel):
+    answers: List[FormAnswerInput] = []
+
+
+@app.get("/api/forms/template")
+async def get_daily_template_endpoint(user: dict = Depends(get_current_user_context)):
+    """Dipakai form-builder (Admin/SuperAdmin lihat/edit) DAN halaman isi
+    form karyawan (semua role, read-only)."""
+    template = db.get_daily_template(user["company_id"])
+    if not template:
+        return {"template": None}
+    return {"template": db.get_template_with_fields(template["id"])}
+
+
+@app.put("/api/forms/template")
+async def save_daily_template_endpoint(
+    req: SaveFormTemplateRequest, user: dict = Depends(get_current_user_context)
+):
+    if not is_admin_tier(user):
+        raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
+    if not req.fields:
+        raise HTTPException(status_code=400, detail="Form minimal punya 1 field.")
+    template = db.save_daily_template(
+        user["company_id"], user["email"], req.name, req.description,
+        [f.model_dump() for f in req.fields],
+    )
+    return {"status": "success", "message": "Form harian disimpan.", "template": template}
+
+
+@app.get("/api/forms/submission/today")
+async def get_today_submission_endpoint(user: dict = Depends(get_current_user_context)):
+    template = db.get_daily_template(user["company_id"])
+    if not template:
+        return {"template": None, "submission": None}
+    submission = db.get_today_submission(template["id"], user["email"], user["company_id"])
+    return {
+        "template": db.get_template_with_fields(template["id"]),
+        "submission": submission,
+    }
+
+
+@app.post("/api/forms/submit")
+async def submit_daily_form_endpoint(
+    req: SubmitFormRequest,
+    user: dict = Depends(get_current_user_context),
+):
+    """Terima jawaban non-file (dan file_url hasil upload sebelumnya lewat
+    /api/forms/upload-answer) untuk semua field form harian sekaligus --
+    jumlah field dinamis, makanya dikirim sebagai list `answers`."""
+    template = db.get_daily_template(user["company_id"])
+    if not template:
+        raise HTTPException(status_code=400, detail="Admin belum mengatur Form Kehadiran/Lapor Kerjaan.")
+
+    fields_by_id = {f["id"]: f for f in db.get_template_with_fields(template["id"])["fields"]}
+    answers = [a.model_dump() for a in req.answers]
+
+    submitted_ids = {a["field_id"] for a in answers if (a.get("value_text") or a.get("file_url"))}
+    missing_required = [
+        f["label"] for fid, f in fields_by_id.items()
+        if f["is_required"] and fid not in submitted_ids
+    ]
+    if missing_required:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Field wajib belum diisi: {', '.join(missing_required)}",
+        )
+
+    settings = db.get_company_settings(user["company_id"])
+    submission = db.submit_daily_form(
+        template["id"], user["email"], user["company_id"], answers,
+        deadline_hour=settings.get("attendance_deadline_hour", 24),
+    )
+    return {"status": "success", "message": "Form terkirim.", "submission": submission}
+
+
+@app.post("/api/forms/upload-answer")
+async def upload_form_answer_endpoint(
+    field_id: str = Form(...),
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user_context),
+):
+    """Upload 1 file jawaban (video/audio/dokumen) untuk 1 field -- dipanggil
+    dulu sebelum /api/forms/submit, hasil file_url-nya diselipkan ke body
+    submit sebagai jawaban field itu."""
+    file_bytes = await file.read()
+    url = db.upload_form_file(user["company_id"], user["email"], field_id, file_bytes, file.filename)
+    ext = file.filename.split(".")[-1].lower()
+    if ext in ("mp4", "mov", "webm", "avi", "mkv", "3gp"):
+        kind = "video"
+    elif ext in ("mp3", "wav", "aac", "ogg", "flac", "m4a"):
+        kind = "audio"
+    else:
+        kind = "document"
+    return {"status": "success", "file_url": url, "file_kind": kind}
+
+
+@app.get("/api/dashboard/submission-status")
+async def dashboard_submission_status_endpoint(user: dict = Depends(get_current_user_context)):
+    if not is_admin_tier(user):
+        raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
+    template = db.get_daily_template(user["company_id"])
+    if not template:
+        return {"sudah": [], "belum": [], "total": 0}
+    return db.get_submission_status_today(user["company_id"], template["id"])
+
+
+@app.get("/api/team/users/{email}/submissions")
+async def user_submissions_endpoint(email: str, user: dict = Depends(get_current_user_context)):
+    require_team_view(user, email)
+    return {"submissions": db.get_user_submissions(email)}
+
+
+# ====================================================================
+# NOTIFIKASI -- pengingat belum isi form + eskalasi berjenjang ke rantai
+# atasan (mengikuti company_settings.notify_atasan_enabled).
+# ====================================================================
+@app.get("/api/notifications")
+async def list_notifications_endpoint(
+    unread_only: bool = False, user: dict = Depends(get_current_user_context)
+):
+    return {
+        "notifications": db.list_notifications(user["email"], unread_only=unread_only),
+        "unread_count": db.count_unread_notifications(user["email"]),
+    }
+
+
+@app.patch("/api/notifications/{notif_id}/read")
+async def mark_notification_read_endpoint(notif_id: str, user: dict = Depends(get_current_user_context)):
+    db.mark_notification_read(notif_id, user["email"])
+    return {"status": "success"}
+
+
+@app.patch("/api/notifications/read-all")
+async def mark_all_notifications_read_endpoint(user: dict = Depends(get_current_user_context)):
+    db.mark_all_notifications_read(user["email"])
+    return {"status": "success"}
+
+
+@app.post("/api/notifications/run-check")
+async def run_notification_check_endpoint(user: dict = Depends(get_current_user_context)):
+    """Jalankan pengecekan telat + eskalasi sekarang juga. Dipanggil manual
+    oleh Admin/SuperAdmin dari UI, ATAU dipanggil otomatis berulang tiap
+    beberapa jam lewat Railway Cron Job / scheduler eksternal yang hit
+    endpoint ini (aman dipanggil berkali-kali, sudah idempotent)."""
+    if not is_admin_tier(user):
+        raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
+    result = db.run_late_submission_check(user["company_id"])
+    return {"status": "success", **result}
+
+
+# ====================================================================
+# BROADCAST PENGUMUMAN VIA EMAIL
+# ====================================================================
+class BroadcastRequest(BaseModel):
+    subject: str
+    body: str
+    target_scope: str = "/"
+
+
+@app.post("/api/announcements/broadcast")
+async def broadcast_announcement_endpoint(
+    req: BroadcastRequest, user: dict = Depends(get_current_user_context)
+):
+    if not is_admin_tier(user):
+        raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
+    if not req.subject.strip() or not req.body.strip():
+        raise HTTPException(status_code=400, detail="Judul dan isi pengumuman wajib diisi.")
+    result = db.send_broadcast_announcement(
+        user["company_id"], user["email"], req.subject.strip(), req.body.strip(), req.target_scope,
+    )
+    return {"status": "success", "message": f"Terkirim ke {result['emails_sent']}/{result['recipients']} email.", **result}
+
+
+@app.get("/api/announcements")
+async def list_announcements_endpoint(user: dict = Depends(get_current_user_context)):
+    if not is_admin_tier(user):
+        raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
+    return {"announcements": db.list_announcements(user["company_id"])}

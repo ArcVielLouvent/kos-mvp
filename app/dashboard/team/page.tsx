@@ -1,13 +1,15 @@
 "use client";
 import { useState, useEffect } from "react";
-import { UserPlus } from "lucide-react";
+import { UserPlus, FileSpreadsheet } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { FolderTreePicker } from "@/components/FolderTreePicker";
+import { ImportEmployeesModal } from "@/components/ImportEmployeesModal";
 import { apiJson } from "@/lib/api";
 import { useToast } from "@/components/ToastProvider";
 import { Copy } from "lucide-react";
 
 export default function TeamPage() {
+  const [showImportModal, setShowImportModal] = useState(false);
   const [emails, setEmails] = useState("");
   const [folder, setFolder] = useState("/");
   const [positionTitle, setPositionTitle] = useState("");
@@ -20,10 +22,14 @@ export default function TeamPage() {
   const { showToast } = useToast();
 
   useEffect(() => {
+    loadExistingUsers();
+  }, []);
+
+  const loadExistingUsers = () => {
     apiJson("/api/team/users")
       .then((data) => setExistingUsers(data.users || []))
       .catch(() => setExistingUsers([]));
-  }, []);
+  };
 
   const copyAllAsTable = () => {
     if (!tempPasswords) return;
@@ -70,7 +76,21 @@ export default function TeamPage() {
 
   return (
     <div>
-      <TopBar title="Manajemen Tim" description="Tambahkan karyawan baru dan atur akses folder mereka." />
+      <TopBar
+        title="Manajemen Tim"
+        description="Tambahkan karyawan baru dan atur akses folder mereka."
+        action={
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 rounded-[var(--radius-control)] border border-navy-100 bg-white px-3 py-2 text-xs font-semibold text-ink-muted hover:bg-navy-50"
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5" /> Import dari Excel
+          </button>
+        }
+      />
+      {showImportModal && (
+        <ImportEmployeesModal onClose={() => setShowImportModal(false)} onDone={loadExistingUsers} />
+      )}
       <div className="grid grid-cols-1 gap-6 p-8 lg:grid-cols-2">
         {/* Kolom kiri: form pendaftaran */}
         <div className="space-y-4 rounded-[var(--radius-card)] border border-navy-100 bg-white p-6">

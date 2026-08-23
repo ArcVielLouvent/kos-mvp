@@ -248,8 +248,50 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
         analysis_file = None
         warning = None
 
+        # ---------- NIAT: KOMPILASI DATA DARI BANYAK DOKUMEN ----------
+        # Dicek PALING AWAL (sebelum is_generate_request) karena frasa
+        # seperti "buatkan daftar/tabel" bisa tabrakan dengan kata kunci
+        # "buatkan" di is_generate_request -- kompilasi harus menang di
+        # kasus itu, bukan malah dianggap "buatkan dokumen karangan AI".
+        if ai.is_compile_request(question):
+            mode = "compile"
+            scope_folder = folder_access
+            docs_in_scope, total_in_scope = db.list_documents_content_in_scope(
+                company_id, scope_folder, limit=25
+            )
+            if not docs_in_scope:
+                answer = f"Tidak ada dokumen ditemukan di folder {scope_folder} untuk dikompilasi."
+            else:
+                columns = ai.determine_extraction_columns(question)
+                compiled_rows, extract_errors = ai.extract_fields_from_documents_parallel(
+                    docs_in_scope, columns
+                )
+                if not compiled_rows:
+                    answer = "Gagal mengekstrak data dari dokumen-dokumen di folder ini. Coba lagi atau periksa apakah dokumennya berisi teks yang cukup."
+                else:
+                    synthesis = ai.synthesize_compiled_answer(question, columns, compiled_rows)
+                    scope_note = (
+                        f"(Diproses dari {len(compiled_rows)} dari total {total_in_scope} dokumen di {scope_folder}"
+                        + (f", {len(extract_errors)} dokumen gagal diekstrak" if extract_errors else "")
+                        + (" -- HANYA sebagian, ada lebih banyak dokumen di folder ini yang belum ikut diproses, persempit ke sub-folder untuk cakupan lebih spesifik" if total_in_scope > len(docs_in_scope) else "")
+                        + ".)"
+                    )
+                    answer = f"{synthesis}\n\n{scope_note}"
+
+                    display_columns = [c for c in columns]
+                    analysis_table = {
+                        "columns": display_columns,
+                        "rows": [{c: row.get(c, "-") for c in display_columns} for row in compiled_rows],
+                    }
+                    xlsx_rows = [{c: row.get(c, "-") for c in display_columns} for row in compiled_rows]
+                    xlsx_bytes = ai.create_xlsx_bytes("Hasil Kompilasi", xlsx_rows)
+                    analysis_file = {
+                        "name": "Hasil Kompilasi.xlsx",
+                        "base64": to_b64(xlsx_bytes),
+                    }
+
         # ---------- NIAT: MINTA DOKUMEN DIBUATKAN ----------
-        if ai.is_generate_request(question):
+        elif ai.is_generate_request(question):
             mode = "generate"
             if not can_write(user):
                 answer = "Membuat dokumen baru butuh akses tulis (CRUD). Hubungi Admin/SuperAdmin Anda."
@@ -892,6 +934,60 @@ async def add_admin_endpoint(
     }
 
 
+@app.get("/api/team/import-template")
+async def download_import_template_endpoint(user: dict = Depends(get_current_user_context)):
+    """Template .xlsx buat diisi Owner/Admin -- kolom sudah sesuai yang
+    dibaca /api/team/import-excel, plus 1 baris contoh."""
+    require_write(user)
+    rows = [{
+        "email": "contoh@perusahaan.com",
+        "full_name": "Nama Lengkap",
+        "position_title": "Staff Operasional",
+        "phone_number": "081234567890",
+        "role": "Karyawan",  # Karyawan atau Admin -- SuperAdmin tidak bisa lewat import
+        "folder_access": "/Operasional/",
+        "manager_email": "atasan@perusahaan.com",
+        "permission_level": "crud",  # cuma dipakai kalau role=Admin -- crud atau read_only
+    }]
+    xlsx_bytes = ai.create_xlsx_bytes("Template Karyawan", rows)
+    return {"filename": "template_import_karyawan.xlsx", "base64": to_b64(xlsx_bytes)}
+
+
+@app.post("/api/team/import-excel")
+async def import_users_excel_endpoint(
+    file: UploadFile = File(...), user: dict = Depends(get_current_user_context)
+):
+    """Import/update karyawan massal dari 1 file Excel -- baris dengan email
+    yang sudah ada di-UPDATE datanya (bukan dibuat akun baru), baris baru
+    dibuatkan akun + password sementara (sama seperti alur tambah manual)."""
+    require_write(user)
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if ext not in ("xlsx", "xls"):
+        raise HTTPException(status_code=400, detail="File harus .xlsx atau .xls.")
+
+    file_bytes = await file.read()
+    try:
+        df = pd.read_excel(io.BytesIO(file_bytes), dtype=str).fillna("")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Gagal membaca file Excel: {str(e)}")
+
+    # Normalisasi nama kolom -- huruf kecil, trim spasi, spasi jadi underscore
+    df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+    if "email" not in df.columns:
+        raise HTTPException(status_code=400, detail="Kolom 'email' wajib ada di file Excel.")
+
+    rows = df.to_dict(orient="records")
+    if not rows:
+        raise HTTPException(status_code=400, detail="File Excel kosong, tidak ada baris data.")
+
+    result = db.import_users_from_rows(rows, user["company_id"])
+    total = len(result["created"]) + len(result["updated"])
+    message = f"{len(result['created'])} akun baru dibuat, {len(result['updated'])} akun diupdate."
+    if result["errors"]:
+        message += f" {len(result['errors'])} baris bermasalah."
+    return {"status": "success" if total else "error", "message": message, **result}
+
+
 @app.get("/api/team/branding")
 async def get_branding_endpoint(user: dict = Depends(get_current_user_context)):
     return db.get_company_branding(user["company_id"])
@@ -1085,6 +1181,18 @@ async def get_quiz_endpoint(quiz_id: str, user: dict = Depends(get_current_user_
     quiz = db.get_quiz(quiz_id)
     if not quiz:
         raise HTTPException(status_code=404, detail="Kuis tidak ditemukan.")
+    if not is_admin_tier(user):
+        # Karyawan TIDAK BOLEH lihat correct_index sebelum submit -- kalau
+        # tidak disaring, jawaban benar bocor lewat network tab browser.
+        # Penilaian tetap dihitung server-side di endpoint /attempts pakai
+        # db.get_quiz yang lengkap (tanpa disaring), bukan dari sini.
+        quiz = {
+            **quiz,
+            "questions": [
+                {k: v for k, v in q.items() if k != "correct_index"}
+                for q in quiz["questions"]
+            ],
+        }
     return quiz
 
 
@@ -1196,8 +1304,12 @@ async def dashboard_endpoint(user: dict = Depends(get_current_user_context)):
 
         root_folders = db.list_child_folders(company_id, "/")
         folder_breakdown = []
+        inbox = {"path": "/Kotak Masuk/", "count": 0}
         for fpath in root_folders:
             _, fdoc_count = db.list_documents_in_folder(company_id, fpath, page=1, page_size=1)
+            if fpath.strip("/").lower() == "kotak masuk":
+                inbox["count"] = fdoc_count
+                continue  # jangan dobel -- Kotak Masuk ditampilkan terpisah di dashboard, bukan ikut grid folder biasa
             folder_breakdown.append({
                 "path": fpath,
                 "name": fpath.rstrip("/").split("/")[-1],
@@ -1214,6 +1326,7 @@ async def dashboard_endpoint(user: dict = Depends(get_current_user_context)):
                 {"label": "Total Percakapan", "value": chat_count},
             ],
             "folderBreakdown": folder_breakdown,
+            "inbox": inbox,
             "recent": recent,
         }
     except Exception:
@@ -1367,10 +1480,37 @@ async def user_submissions_endpoint(email: str, user: dict = Depends(get_current
 async def list_notifications_endpoint(
     unread_only: bool = False, user: dict = Depends(get_current_user_context)
 ):
+    """Dipakai dropdown bell -- dibatasi (default 8) supaya ringkas, isi
+    penuh + pagination ada di /api/notifications/history."""
     return {
-        "notifications": db.list_notifications(user["email"], unread_only=unread_only),
+        "notifications": db.list_notifications(user["email"], unread_only=unread_only, limit=8),
         "unread_count": db.count_unread_notifications(user["email"]),
     }
+
+
+@app.get("/api/notifications/history")
+async def notifications_history_endpoint(
+    page: int = 1, page_size: int = 20, user: dict = Depends(get_current_user_context)
+):
+    """Halaman khusus /dashboard/notifications -- daftar penuh + pagination,
+    beda dengan /api/notifications yang cuma buat dropdown bell."""
+    items, total = db.list_notifications_paginated(user["email"], page=page, page_size=page_size)
+    return {"notifications": items, "total": total, "page": page, "page_size": page_size}
+
+
+@app.delete("/api/notifications/read")
+async def delete_read_notifications_endpoint(user: dict = Depends(get_current_user_context)):
+    """WAJIB didefinisikan SEBELUM /api/notifications/{notif_id} -- kalau
+    kebalik, request ke sini malah ketangkep rute dinamis itu duluan
+    (notif_id="read"), FastAPI cocokkan path sesuai urutan definisi."""
+    db.delete_read_notifications(user["email"])
+    return {"status": "success"}
+
+
+@app.delete("/api/notifications/{notif_id}")
+async def delete_notification_endpoint(notif_id: str, user: dict = Depends(get_current_user_context)):
+    db.delete_notification(notif_id, user["email"])
+    return {"status": "success"}
 
 
 @app.patch("/api/notifications/{notif_id}/read")

@@ -1,7 +1,13 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Bell, CalendarClock, Megaphone, TrendingUp, Check } from "lucide-react";
+import Link from "next/link";
+import { Bell, CalendarClock, Megaphone, TrendingUp, Check, ListChecks } from "lucide-react";
 import { apiJson } from "@/lib/api";
+
+// Event global -- dipanggil dari halaman lain (mis. setelah kirim broadcast)
+// supaya bell langsung update TANPA nunggu polling 60 detik atau reload
+// manual. Lihat announcements/page.tsx: window.dispatchEvent(new Event(NOTIF_REFRESH_EVENT))
+export const NOTIF_REFRESH_EVENT = "kos:refresh-notifications";
 
 interface Notif {
   id: string;
@@ -47,7 +53,12 @@ export function NotificationBell() {
   useEffect(() => {
     load();
     const interval = setInterval(load, 60_000); // polling tiap 1 menit
-    return () => clearInterval(interval);
+    const onExternalRefresh = () => load();
+    window.addEventListener(NOTIF_REFRESH_EVENT, onExternalRefresh);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener(NOTIF_REFRESH_EVENT, onExternalRefresh);
+    };
   }, []);
 
   useEffect(() => {
@@ -112,8 +123,10 @@ export function NotificationBell() {
                   >
                     <Icon className="mt-0.5 h-4 w-4 shrink-0 text-navy-700" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-semibold text-ink">{n.title}</p>
-                      <p className="mt-0.5 line-clamp-2 text-2xs text-ink-muted">{n.message}</p>
+                      <p className="text-xs font-semibold text-ink">{n.title}</p>
+                      {/* Pesan panjang tetap tampil penuh di sini (whitespace-pre-wrap,
+                          bukan line-clamp) -- dropdown ini scrollable (max-h-96) jadi aman. */}
+                      <p className="mt-0.5 whitespace-pre-wrap text-2xs text-ink-muted">{n.message}</p>
                       <p className="mt-1 text-2xs text-ink-faint">{timeAgo(n.created_at)}</p>
                     </div>
                     {!n.is_read && <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-navy-900" />}
@@ -122,6 +135,13 @@ export function NotificationBell() {
               })
             )}
           </div>
+          <Link
+            href="/dashboard/notifications"
+            onClick={() => setOpen(false)}
+            className="flex items-center justify-center gap-1.5 border-t border-navy-100 bg-navy-50/50 py-2.5 text-2xs font-semibold text-navy-900 hover:bg-navy-50"
+          >
+            <ListChecks className="h-3.5 w-3.5" /> Lihat semua notifikasi
+          </Link>
         </div>
       )}
     </div>

@@ -4,9 +4,10 @@ import { TopBar } from "@/components/TopBar";
 import { FileManagerBody } from "@/components/FileManagerBody";
 import { EmployeeDirectoryBody } from "@/components/EmployeeDirectoryBody";
 import { ChatHistoryBrowser } from "@/components/ChatHistoryBrowser";
-import { FileText, Users, MessageSquare, ArrowLeft, Folder, CalendarCheck, AlertCircle } from "lucide-react";
+import { FileText, Users, MessageSquare, ArrowLeft, Folder, CalendarCheck, AlertCircle, Inbox } from "lucide-react";
 import { apiJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { NOTIF_REFRESH_EVENT } from "@/components/NotificationBell";
 
 type ViewMode = "overview" | "files" | "employees" | "chats";
 
@@ -31,6 +32,7 @@ export default function DashboardPage() {
     const [employeeCount, setEmployeeCount] = useState<number | string>("-");
     const [chatCount, setChatCount] = useState<number | string>("-");
     const [folderBreakdown, setFolderBreakdown] = useState<any[]>([]);
+    const [inbox, setInbox] = useState<{ path: string; count: number } | null>(null);
     const [recentActivity, setRecentActivity] = useState<any[]>([]);
     const [attendanceStatus, setAttendanceStatus] = useState<any>(null);
     const [showBelumList, setShowBelumList] = useState(false);
@@ -52,6 +54,7 @@ export default function DashboardPage() {
                 setEmployeeCount(find("Total Karyawan"));
                 setChatCount(find("Total Percakapan"));
                 setFolderBreakdown(result.folderBreakdown || []);
+                setInbox(result.inbox || null);
                 setRecentActivity(result.recent || []);
                 setIsLoading(false);
             })
@@ -173,7 +176,7 @@ export default function DashboardPage() {
                                                 </div>
                                             ))}
                                             <button
-                                                onClick={() => apiJson("/api/notifications/run-check", { method: "POST" }).catch(() => {})}
+                                                onClick={() => apiJson("/api/notifications/run-check", { method: "POST" }).then(() => window.dispatchEvent(new Event(NOTIF_REFRESH_EVENT))).catch(() => {})}
                                                 className="mt-1 text-2xs font-semibold text-navy-700 hover:underline"
                                             >
                                                 Kirim pengingat sekarang
@@ -181,6 +184,27 @@ export default function DashboardPage() {
                                         </div>
                                     )}
                                 </div>
+                            )}
+
+                            {/* Kotak Masuk -- folder default tempat karyawan upload dokumen.
+                                Ditampilkan terpisah & selalu di atas supaya tidak tenggelam
+                                kalau folder di root banyak. */}
+                            {inbox && (
+                                <button
+                                    onClick={() => openFiles(inbox.path)}
+                                    className="flex w-full items-center justify-between rounded-[var(--radius-card)] border border-navy-100 bg-white p-4 text-left shadow-[var(--shadow-card)] transition-transform hover:-translate-y-0.5"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-navy-50">
+                                            <Inbox className="h-5 w-5 text-navy-700" />
+                                        </span>
+                                        <div>
+                                            <p className="text-sm font-semibold text-ink">Kotak Masuk</p>
+                                            <p className="text-xs text-ink-faint">Dokumen yang diupload karyawan tanpa folder tujuan tertentu</p>
+                                        </div>
+                                    </div>
+                                    <span className="font-mono-data text-lg font-semibold text-ink">{inbox.count}</span>
+                                </button>
                             )}
 
                             {/* Preview root folder -- klik langsung ke folder itu di File Manager */}

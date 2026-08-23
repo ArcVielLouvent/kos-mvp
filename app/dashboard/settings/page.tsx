@@ -3,12 +3,13 @@ import { useState, useEffect } from "react";
 import { TopBar } from "@/components/TopBar";
 import { getStoredUser } from "@/lib/api";
 import { apiJson } from "@/lib/api";
-import { Building2, Users, Image as ImageIcon, FileText, Clock, AlertTriangle, Bell } from "lucide-react";
+import { Building2, Users, Clock, AlertTriangle, Bell } from "lucide-react";
+import { BrandingSettings } from "@/components/BrandingSettings";
 
 export default function SettingsPage() {
     const user = getStoredUser();
     const [settings, setSettings] = useState<any>(null);
-    const [isSaving, setIsSaving] = useState(false);
+    const [savingKey, setSavingKey] = useState<string | null>(null);
 
     useEffect(() => {
         apiJson("/api/settings/company")
@@ -20,7 +21,7 @@ export default function SettingsPage() {
         if (!settings) return;
         const newValue = !settings[key];
         setSettings({ ...settings, [key]: newValue }); // optimistic
-        setIsSaving(true);
+        setSavingKey(key);
         try {
             await apiJson("/api/settings/company", {
                 method: "PATCH",
@@ -29,7 +30,7 @@ export default function SettingsPage() {
         } catch {
             setSettings({ ...settings, [key]: !newValue }); // rollback kalau gagal
         } finally {
-            setIsSaving(false);
+            setSavingKey((k) => (k === key ? null : k));
         }
     };
 
@@ -47,7 +48,7 @@ export default function SettingsPage() {
         if (!settings) return;
         const prev = settings.attendance_deadline_hour;
         setSettings({ ...settings, attendance_deadline_hour: value }); // optimistic
-        setIsSaving(true);
+        setSavingKey("attendance_deadline_hour");
         try {
             await apiJson("/api/settings/company", {
                 method: "PATCH",
@@ -57,7 +58,7 @@ export default function SettingsPage() {
             setSettings({ ...settings, attendance_deadline_hour: prev }); // rollback
             setDeadlineDraft(prev);
         } finally {
-            setIsSaving(false);
+            setSavingKey((k) => (k === "attendance_deadline_hour" ? null : k));
         }
     };
 
@@ -111,14 +112,14 @@ export default function SettingsPage() {
                                 </div>
                                 <button
                                     onClick={() => toggle("poin_pelanggaran_enabled")}
-                                    disabled={isSaving}
-                                    className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                                    disabled={savingKey === "poin_pelanggaran_enabled"}
+                                    className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-60 ${
                                         settings.poin_pelanggaran_enabled ? "bg-navy-900" : "bg-navy-100"
                                     }`}
                                 >
                                     <span
-                                        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                                            settings.poin_pelanggaran_enabled ? "translate-x-5" : "translate-x-0.5"
+                                        className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                                            settings.poin_pelanggaran_enabled ? "translate-x-5" : "translate-x-0"
                                         }`}
                                     />
                                 </button>
@@ -134,14 +135,14 @@ export default function SettingsPage() {
                                 </div>
                                 <button
                                     onClick={() => toggle("notify_atasan_enabled")}
-                                    disabled={isSaving}
-                                    className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                                    disabled={savingKey === "notify_atasan_enabled"}
+                                    className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-60 ${
                                         settings.notify_atasan_enabled ? "bg-navy-900" : "bg-navy-100"
                                     }`}
                                 >
                                     <span
-                                        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                                            settings.notify_atasan_enabled ? "translate-x-5" : "translate-x-0.5"
+                                        className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                                            settings.notify_atasan_enabled ? "translate-x-5" : "translate-x-0"
                                         }`}
                                     />
                                 </button>
@@ -169,7 +170,7 @@ export default function SettingsPage() {
                                             onChange={(e) => setDeadlineDraft(Number(e.target.value))}
                                             onMouseUp={(e) => commitDeadline(Number((e.target as HTMLInputElement).value))}
                                             onTouchEnd={(e) => commitDeadline(Number((e.target as HTMLInputElement).value))}
-                                            disabled={isSaving}
+                                            disabled={savingKey === "attendance_deadline_hour"}
                                             className="h-2 w-full cursor-pointer appearance-none rounded-full bg-navy-100 accent-navy-900 disabled:cursor-not-allowed disabled:opacity-50"
                                         />
                                         <div className="mt-1 flex justify-between text-2xs text-ink-faint">
@@ -184,23 +185,8 @@ export default function SettingsPage() {
                     )}
                 </div>
 
-                <div className="max-w-lg space-y-4 rounded-[var(--radius-card)] border border-dashed border-navy-200 bg-navy-50/40 p-6">
-                    <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4 text-navy-400" />
-                        <h3 className="text-sm font-semibold text-ink-muted">Branding Perusahaan (Segera Hadir)</h3>
-                    </div>
-                    <p className="text-xs text-ink-faint">
-                        Upload logo & template surat perusahaan akan tersedia di sini setelah fitur file-generation
-                        AI digabungkan dari branch pengembangan terpisah.
-                    </p>
-                    <div className="flex gap-3 opacity-50">
-                        <div className="flex flex-1 items-center gap-2 rounded border border-navy-100 bg-white px-3 py-2 text-xs text-ink-faint">
-                            <ImageIcon className="h-3.5 w-3.5" /> Logo perusahaan
-                        </div>
-                        <div className="flex flex-1 items-center gap-2 rounded border border-navy-100 bg-white px-3 py-2 text-xs text-ink-faint">
-                            <FileText className="h-3.5 w-3.5" /> Template surat (.docx)
-                        </div>
-                    </div>
+                <div className="max-w-2xl">
+                    <BrandingSettings />
                 </div>
             </div>
         </div>

@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { Megaphone, Send, Loader2, Users, Clock } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { apiJson } from "@/lib/api";
+import { NOTIF_REFRESH_EVENT } from "@/components/NotificationBell";
 
 export default function AnnouncementsPage() {
   const [subject, setSubject] = useState("");
@@ -40,6 +41,7 @@ export default function AnnouncementsPage() {
       setSubject("");
       setBody("");
       loadHistory();
+      window.dispatchEvent(new Event(NOTIF_REFRESH_EVENT)); // biar bell langsung update, tidak perlu refresh manual
     } catch (e: any) {
       setResultMsg(e.message || "Gagal mengirim pengumuman.");
     } finally {

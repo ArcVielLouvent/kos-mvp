@@ -1,5 +1,7 @@
 supabase
 google-genai
+openai
+youtube-transcript-api
 bcrypt
 pandas
 python-docx

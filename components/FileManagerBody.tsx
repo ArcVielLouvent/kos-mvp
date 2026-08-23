@@ -198,19 +198,13 @@ export function FileManagerBody({ initialPath = "/" }: { initialPath?: string })
     }
   };
 
-  const handleMoveDoc = async (docId: string) => {
-    const newPath = prompt("Pindahkan dokumen ke folder (mis. /SOP/):", currentPath);
-    if (!newPath) return;
-    try {
-      const result = await apiJson("/api/documents/move", {
-        method: "PATCH",
-        body: JSON.stringify({ doc_id: docId, new_path: newPath }),
-      });
-      setActionMsg(result.message);
-      loadFiles();
-    } catch (e: any) {
-      setActionMsg(e.message || "Gagal memindahkan dokumen.");
-    }
+  const handleMoveDoc = (docId: string) => {
+    // Sama kayak bulk move -- pakai modal FolderTreePicker, bukan prompt()
+    // teks manual. "Pindahkan 1 file" ini teknisnya bulk-move dengan isi 1 doc.
+    setSelectedFolders(new Set());
+    setSelectedDocs(new Set([docId]));
+    setMoveDestination(currentPath);
+    setShowMoveModal(true);
   };
 
   const toggleFolder = (path: string) => {

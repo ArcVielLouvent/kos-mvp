@@ -885,6 +885,28 @@ def list_structured_documents(company_id: str, folder_prefix: str = "/"):
     return r.data
 
 
+def list_documents_content_in_scope(company_id: str, folder_prefix: str = "/", limit: int = 25):
+    """Ambil dokumen (id+title+content, TANPA structured_data) dalam cakupan
+    folder tertentu -- dipakai fitur kompilasi lintas-dokumen di Chat KOS
+    (mis. "buatkan daftar dari semua CV di folder ini"). BEDA dengan RAG
+    biasa yang cuma ambil top-K hasil similarity search -- ini exhaustive
+    (semua dokumen di scope, dibatasi `limit` demi biaya/waktu, urut
+    terbaru dulu). Kalau folder berisi lebih dari `limit` dokumen, caller
+    WAJIB kasih tahu user cuma sebagian yang diproses (penting untuk
+    keputusan HR supaya tidak diam-diam kelewat data)."""
+    client = get_client()
+    r = (
+        client.table("documents")
+        .select("id, title, content, folder_path", count="exact")
+        .eq("company_id", company_id)
+        .like("folder_path", f"{normalize_folder(folder_prefix)}%")
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return r.data, (r.count or 0)
+
+
 # ==========================================
 # BRANDING PERUSAHAAN (logo, template surat)
 # ==========================================
@@ -1391,6 +1413,38 @@ def list_notifications(recipient_email: str, unread_only: bool = False, limit: i
     return q.execute().data
 
 
+def list_notifications_paginated(recipient_email: str, page: int = 1, page_size: int = 20):
+    """Dipakai halaman khusus /dashboard/notifications -- return
+    (list, total_count) supaya bisa dipaginasi, beda dengan list_notifications
+    yang cuma buat dropdown bell (flat, dibatasi limit kecil)."""
+    client = get_client()
+    offset = (page - 1) * page_size
+    r = (
+        client.table("notifications")
+        .select("*", count="exact")
+        .eq("recipient_email", recipient_email.strip().lower())
+        .order("created_at", desc=True)
+        .range(offset, offset + page_size - 1)
+        .execute()
+    )
+    return r.data, (r.count or 0)
+
+
+def delete_notification(notif_id: str, recipient_email: str):
+    client = get_client()
+    client.table("notifications").delete().eq("id", notif_id).eq(
+        "recipient_email", recipient_email.strip().lower()
+    ).execute()
+
+
+def delete_read_notifications(recipient_email: str):
+    """'Hapus yang sudah dibaca' -- bulk clear, tidak menyentuh yang belum dibaca."""
+    client = get_client()
+    client.table("notifications").delete().eq(
+        "recipient_email", recipient_email.strip().lower()
+    ).eq("is_read", True).execute()
+
+
 def count_unread_notifications(recipient_email: str) -> int:
     client = get_client()
     r = (
@@ -1719,3 +1773,98 @@ def upload_work_report_attachment(
     )
     url = signed.get("signedURL") or signed.get("signed_url")
     return {"url": url, "kind": classify_file_kind(filename)}
+
+
+# ============================================================
+# IMPORT/UPDATE KARYAWAN LEWAT EXCEL -- owner/admin upload 1 file .xlsx
+# berisi banyak baris data karyawan sekaligus (email, nama, jabatan,
+# folder akses, atasan, dst), TIDAK perlu isi form satu-satu di UI.
+# Baris dengan email yang SUDAH ADA akan di-UPDATE (bukan bikin akun baru
+# lagi), baris dengan email baru akan dibuatkan akun baru (password
+# sementara, sama seperti alur tambah karyawan manual).
+# ============================================================
+ALLOWED_IMPORT_ROLES = {"Karyawan", "Admin"}  # SuperAdmin sengaja TIDAK boleh lewat import file (proteksi eskalasi privilege tidak sengaja)
+
+
+def import_users_from_rows(rows: list, company_id: str) -> dict:
+    client = get_client()
+
+    existing_r = client.table("users").select("email").eq("company_id", company_id).execute()
+    existing_emails = {u["email"] for u in existing_r.data}
+
+    created, updated, errors = [], [], []
+    new_records = []
+
+    for i, row in enumerate(rows, start=2):  # baris 2 = baris pertama setelah header di Excel
+        email = (row.get("email") or "").strip().lower()
+        if not email or "@" not in email:
+            errors.append(f"Baris {i}: kolom email kosong/tidak valid, dilewati.")
+            continue
+
+        role = (row.get("role") or "Karyawan").strip().title()
+        if role not in ALLOWED_IMPORT_ROLES:
+            errors.append(f"Baris {i} ({email}): role '{role}' tidak didukung lewat import (cuma Karyawan/Admin), dianggap Karyawan.")
+            role = "Karyawan"
+
+        folder_access = normalize_folder(row.get("folder_access") or "/")
+        full_name = (row.get("full_name") or "").strip() or None
+        position_title = (row.get("position_title") or "").strip() or None
+        phone_number = (row.get("phone_number") or "").strip() or None
+        manager_email = (row.get("manager_email") or "").strip().lower() or None
+        permission_level = (row.get("permission_level") or "crud").strip().lower()
+        if permission_level not in ("crud", "read_only"):
+            permission_level = "crud"
+
+        create_folder(company_id, folder_access)
+
+        if email in existing_emails:
+            # UPDATE -- SENGAJA tidak menyentuh kolom password/must_change_password
+            # sama sekali, supaya login karyawan yang sudah ada tidak ke-reset.
+            update_payload = {
+                "role": role,
+                "folder_access": folder_access,
+                "full_name": full_name,
+                "position_title": position_title,
+                "phone_number": phone_number,
+                "manager_email": manager_email,
+            }
+            if role == "Admin":
+                update_payload["permission_level"] = permission_level
+            try:
+                client.table("users").update(update_payload).eq("email", email).eq("company_id", company_id).execute()
+                updated.append(email)
+            except Exception as e:
+                errors.append(f"Baris {i} ({email}): gagal update -- {str(e)}")
+        else:
+            temp_pw = secrets.token_urlsafe(6)
+            new_records.append({
+                "email": email,
+                "role": role,
+                "folder_access": folder_access,
+                "password": hash_password(temp_pw),
+                "company_id": company_id,
+                "must_change_password": True,
+                "full_name": full_name,
+                "position_title": position_title,
+                "phone_number": phone_number,
+                "manager_email": manager_email,
+                "permission_level": permission_level if role == "Admin" else "crud",
+                "_temp_password": temp_pw,  # dibuang sebelum insert, cuma buat dikembalikan ke caller
+            })
+
+    temp_passwords = {}
+    if new_records:
+        for r in new_records:
+            temp_passwords[r["email"]] = r.pop("_temp_password")
+        try:
+            client.table("users").insert(new_records).execute()
+            created.extend([r["email"] for r in new_records])
+        except Exception as e:
+            errors.append(f"Gagal membuat {len(new_records)} akun baru -- {str(e)}")
+
+    return {
+        "created": created,
+        "updated": updated,
+        "errors": errors,
+        "temporary_passwords": temp_passwords,
+    }

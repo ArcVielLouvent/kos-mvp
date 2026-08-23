@@ -64,6 +64,37 @@ header X-User-Email biasa -- ini bagian yang perlu didiskusikan lagi kalau
 mau full-otomatis).
 
 
+## 7. Pilih provider AI: Gemini atau OpenAI
+
+Set di Railway Variables:
+- `AI_PROVIDER=openai` (atau `gemini`, default kalau tidak diisi)
+- Isi API key sesuai provider aktif: `OPENAI_API_KEY` atau `GEMINI_API_KEY` (yang tidak aktif boleh kosong)
+
+**PENTING sebelum pindah provider di produksi yang sudah ada isinya:**
+Dokumen yang SUDAH di-embed pakai Gemini tidak "nyambung" secara semantik
+kalau dicari pakai model embedding OpenAI (meski sama-sama 768 dimensi
+angka, ruang vektornya beda total) -- pencarian RAG buat dokumen lama
+akan jadi kurang relevan (bukan error, cuma diam-diam kurang akurat).
+Dokumen yang diupload SETELAH pindah provider aman, ter-embed pakai
+provider baru. Kalau company sudah punya banyak dokumen lama, sebaiknya
+upload ulang / re-embed dulu setelah pindah provider. Detail lengkap ada
+di komentar `api/ai.py`.
+
+Fitur video/YouTube native (Gemini bisa "menonton" langsung) tidak ada
+padanan persis di OpenAI -- versi OpenAI cuma transkrip audio (Whisper)
+untuk file video, dan transkrip caption untuk YouTube (kalau videonya
+punya caption). Ini keterbatasan asli provider, bukan bug.
+
+## 8. Schema database: mana yang harus dijalankan?
+
+- `api/migration_scope_*.sql` -- jalankan BERURUTAN sesuai nomor scope-nya
+  kalau ini setup database BARU dari nol, atau kalau database lama belum
+  ketinggalan migrasi tertentu.
+- `api/schema.sql` -- BUKAN untuk dijalankan langsung, ini referensi
+  lengkap "seperti apa struktur DB seharusnya sekarang" (semua tabel,
+  lama+baru, digabung). Dipakai untuk cek/bandingkan, bukan dieksekusi
+  urut dari atas ke bawah.
+
 ## Catatan
 
 - `api/app.py` (Streamlit) adalah versi lama, sudah tidak dipakai di produksi -- dibiarkan di repo cuma sebagai referensi, boleh dihapus kapan saja kalau sudah yakin tidak perlu rollback ke sana.

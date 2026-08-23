@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, MessageSquare, FolderTree, Users, Settings, User, LogOut, PanelLeftClose, PanelLeftOpen, Upload, CalendarCheck, Megaphone, ClipboardList } from "lucide-react";
+import { LayoutDashboard, MessageSquare, FolderTree, Users, Settings, User, LogOut, PanelLeftClose, PanelLeftOpen, Upload, CalendarCheck, Megaphone, ClipboardList, GraduationCap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Sidebar({ role, userEmail, companyName }: { role: string; userEmail: string; companyName: string }) {
@@ -34,6 +34,7 @@ export function Sidebar({ role, userEmail, companyName }: { role: string; userEm
     { name: "Chat KOS", href: "/dashboard/chat", icon: MessageSquare },
     { name: "Kehadiran", href: "/dashboard/attendance", icon: CalendarCheck },
     { name: "Lapor Kerjaan", href: "/dashboard/work-reports", icon: ClipboardList },
+    { name: "Kuis Training", href: "/dashboard/quizzes", icon: GraduationCap },
     ...(!isAdminTier ? [{ name: "Upload Dokumen", href: "/dashboard/upload", icon: Upload }] : []),
     ...(isAdminTier ? [{ name: "Manajemen Tim", href: "/dashboard/team", icon: Users }] : []),
     ...(isAdminTier ? [{ name: "Broadcast", href: "/dashboard/announcements", icon: Megaphone }] : []),

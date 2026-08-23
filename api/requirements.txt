@@ -12,6 +12,7 @@ pdfplumber
 pytesseract
 pdf2image
 reportlab
+matplotlib
 requests
 fastapi
 uvicorn

@@ -885,6 +885,14 @@ def list_structured_documents(company_id: str, folder_prefix: str = "/"):
     return r.data
 
 
+def get_document_by_id(doc_id: str):
+    """Ambil 1 dokumen lengkap (termasuk structured_data) -- dipakai
+    halaman Insight/Grafik buat eksplorasi 1 dataset secara interaktif."""
+    client = get_client()
+    r = client.table("documents").select("*").eq("id", doc_id).execute()
+    return r.data[0] if r.data else None
+
+
 def list_documents_content_in_scope(company_id: str, folder_prefix: str = "/", limit: int = 25):
     """Ambil dokumen (id+title+content, TANPA structured_data) dalam cakupan
     folder tertentu -- dipakai fitur kompilasi lintas-dokumen di Chat KOS

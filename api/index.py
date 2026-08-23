@@ -246,6 +246,7 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
         generated_files = []
         analysis_table = None
         analysis_file = None
+        chart_image = None
         warning = None
 
         # ---------- NIAT: KOMPILASI DATA DARI BANYAK DOKUMEN ----------
@@ -290,6 +291,25 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
                         "base64": to_b64(xlsx_bytes),
                     }
 
+                    if ai.is_chart_request(question):
+                        try:
+                            suggestion = ai.suggest_chart_from_table(question, display_columns, compiled_rows)
+                            label_col, value_col = suggestion["label_column"], suggestion["value_column"]
+                            chart_labels = [str(r.get(label_col, "-")) for r in compiled_rows]
+                            chart_values = []
+                            for r in compiled_rows:
+                                raw_val = str(r.get(value_col, "0")).replace(",", "").strip()
+                                try:
+                                    chart_values.append(float(raw_val))
+                                except ValueError:
+                                    chart_values.append(0)
+                            chart_bytes = ai.create_chart_image_bytes(
+                                suggestion.get("chart_type", "bar"), chart_labels, chart_values, question[:60]
+                            )
+                            chart_image = {"base64": to_b64(chart_bytes), "mime": "image/png"}
+                        except Exception:
+                            chart_image = None  # gagal bikin chart -> tetap tampilkan tabel & jawaban teks, jangan gagalkan seluruh respons
+
         # ---------- NIAT: MINTA DOKUMEN DIBUATKAN ----------
         elif ai.is_generate_request(question):
             mode = "generate"
@@ -297,14 +317,8 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
                 answer = "Membuat dokumen baru butuh akses tulis (CRUD). Hubungi Admin/SuperAdmin Anda."
             else:
                 doc_type = ai.infer_doc_type(question)
-                draft_content = ai.generate_draft_document(question, doc_type)
-                answer = draft_content
-                warning = (
-                    "Draf berdasarkan pengetahuan umum AI -- BUKAN dokumen resmi. "
-                    "Review dulu sebelum dipakai."
-                )
-                db.save_ai_draft(
-                    company_id, user["email"], question[:60], draft_content)
+                requested_format = ai.detect_requested_format(question)
+                title_for_file = question[:50].strip() or "Dokumen"
 
                 branding = db.get_company_branding(company_id)
                 logo_bytes = None
@@ -314,37 +328,74 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
                     except Exception:
                         logo_bytes = None
 
-                title_for_file = question[:50].strip() or "Dokumen"
+                warning = (
+                    "Draf berdasarkan pengetahuan umum AI -- BUKAN dokumen resmi. "
+                    "Review dulu sebelum dipakai."
+                )
 
-                if branding.get("docx_template_url"):
-                    try:
-                        template_bytes = db.fetch_file_bytes(
-                            branding["docx_template_url"])
-                        docx_bytes = ai.create_docx_from_template(
-                            template_bytes, title_for_file, draft_content
-                        )
-                    except Exception:
+                if requested_format == "xlsx":
+                    # ---------- FORMAT EXCEL: AI mengarang struktur tabel ----------
+                    table_data = ai.generate_draft_table_data(question, doc_type)
+                    columns, rows = table_data["columns"], table_data["rows"]
+                    answer = (
+                        "[DRAF AI -- PERLU DIREVIEW SEBELUM DIGUNAKAN RESMI]\n\n"
+                        f"Tabel dengan kolom: {', '.join(columns)} ({len(rows)} baris) sudah dibuat, silakan unduh di bawah."
+                    )
+                    db.save_ai_draft(company_id, user["email"], question[:60], answer)
+                    xlsx_bytes = ai.create_xlsx_bytes(title_for_file, rows)
+                    generated_files = [
+                        {"name": f"{title_for_file}.xlsx", "format": "xlsx", "base64": to_b64(xlsx_bytes)},
+                    ]
+
+                elif requested_format == "pptx":
+                    # ---------- FORMAT POWERPOINT: AI mengarang struktur slide ----------
+                    slides = ai.generate_draft_slides(question, doc_type)
+                    answer = (
+                        "[DRAF AI -- PERLU DIREVIEW SEBELUM DIGUNAKAN RESMI]\n\n"
+                        f"Presentasi dengan {len(slides)} slide sudah dibuat, silakan unduh di bawah."
+                    )
+                    db.save_ai_draft(company_id, user["email"], question[:60], answer)
+                    pptx_bytes = ai.create_pptx_bytes(title_for_file, slides, logo_bytes)
+                    generated_files = [
+                        {"name": f"{title_for_file}.pptx", "format": "pptx", "base64": to_b64(pptx_bytes)},
+                    ]
+
+                else:
+                    # ---------- DEFAULT: DOCX + PDF (perilaku lama) ----------
+                    draft_content = ai.generate_draft_document(question, doc_type)
+                    answer = draft_content
+                    db.save_ai_draft(
+                        company_id, user["email"], question[:60], draft_content)
+
+                    if branding.get("docx_template_url"):
+                        try:
+                            template_bytes = db.fetch_file_bytes(
+                                branding["docx_template_url"])
+                            docx_bytes = ai.create_docx_from_template(
+                                template_bytes, title_for_file, draft_content
+                            )
+                        except Exception:
+                            docx_bytes = ai.create_docx_bytes(
+                                title_for_file, draft_content, logo_bytes)
+                    else:
                         docx_bytes = ai.create_docx_bytes(
                             title_for_file, draft_content, logo_bytes)
-                else:
-                    docx_bytes = ai.create_docx_bytes(
+
+                    pdf_bytes = ai.create_pdf_bytes(
                         title_for_file, draft_content, logo_bytes)
 
-                pdf_bytes = ai.create_pdf_bytes(
-                    title_for_file, draft_content, logo_bytes)
-
-                generated_files = [
-                    {
-                        "name": f"{title_for_file}.docx",
-                        "format": "docx",
-                        "base64": to_b64(docx_bytes),
-                    },
-                    {
-                        "name": f"{title_for_file}.pdf",
-                        "format": "pdf",
-                        "base64": to_b64(pdf_bytes),
-                    },
-                ]
+                    generated_files = [
+                        {
+                            "name": f"{title_for_file}.docx",
+                            "format": "docx",
+                            "base64": to_b64(docx_bytes),
+                        },
+                        {
+                            "name": f"{title_for_file}.pdf",
+                            "format": "pdf",
+                            "base64": to_b64(pdf_bytes),
+                        },
+                    ]
 
         # ---------- NIAT: ANALISIS DATA TERSTRUKTUR (XLSX) ----------
         elif ai.is_analysis_request(question):
@@ -424,6 +475,26 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
                             "base64": to_b64(xlsx_bytes),
                         }
 
+                        if ai.is_chart_request(question) and records:
+                            try:
+                                suggestion = ai.suggest_chart_from_table(
+                                    question, list(result_df.columns), records)
+                                label_col, value_col = suggestion["label_column"], suggestion["value_column"]
+                                chart_labels = [str(r.get(label_col, "-")) for r in records]
+                                chart_values = []
+                                for r in records:
+                                    raw_val = str(r.get(value_col, "0")).replace(",", "").strip()
+                                    try:
+                                        chart_values.append(float(raw_val))
+                                    except ValueError:
+                                        chart_values.append(0)
+                                chart_bytes = ai.create_chart_image_bytes(
+                                    suggestion.get("chart_type", "bar"), chart_labels, chart_values, question[:60]
+                                )
+                                chart_image = {"base64": to_b64(chart_bytes), "mime": "image/png"}
+                            except Exception:
+                                chart_image = None
+
         # ---------- NIAT: MINTA FILE ASLI ----------
         elif ai.is_file_request(question):
             mode = "file_request"
@@ -472,6 +543,7 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
             "generatedFiles": generated_files,
             "analysisTable": analysis_table,
             "analysisFile": analysis_file,
+            "chartImage": chart_image,
             "warning": warning,
         }
     except Exception as e:
@@ -986,6 +1058,30 @@ async def import_users_excel_endpoint(
     if result["errors"]:
         message += f" {len(result['errors'])} baris bermasalah."
     return {"status": "success" if total else "error", "message": message, **result}
+
+
+@app.get("/api/insights/datasets")
+async def list_insight_datasets_endpoint(user: dict = Depends(get_current_user_context)):
+    """Daftar dokumen terstruktur (hasil upload XLSX) yang bisa divisualisasikan
+    di halaman Insight/Grafik -- dibatasi cakupan folder_access user."""
+    docs = db.list_structured_documents(user["company_id"], user["folder_access"])
+    return {"datasets": [{"id": d["id"], "title": d["title"]} for d in docs]}
+
+
+@app.get("/api/insights/dataset/{doc_id}")
+async def get_insight_dataset_endpoint(doc_id: str, user: dict = Depends(get_current_user_context)):
+    """Ambil data mentah 1 dataset (semua kolom+baris) buat dieksplorasi
+    bebas di halaman Insight -- BEDA dengan analysis di chat yang AI
+    filter otomatis, di sini user pilih sendiri kolom mana yang mau
+    di-chart lewat dropdown, murni interaktif tanpa panggilan AI lagi."""
+    doc = db.get_document_by_id(doc_id)
+    if not doc or doc["company_id"] != user["company_id"]:
+        raise HTTPException(status_code=404, detail="Dataset tidak ditemukan.")
+    sheets = doc.get("structured_data") or []
+    if not sheets or not sheets[0].get("rows"):
+        raise HTTPException(status_code=400, detail="Dataset ini tidak punya baris data.")
+    sheet = sheets[0]
+    return {"title": doc["title"], "columns": list(sheet["rows"][0].keys()), "rows": sheet["rows"]}
 
 
 @app.get("/api/team/branding")

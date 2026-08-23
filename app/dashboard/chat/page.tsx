@@ -34,6 +34,7 @@ interface Message {
     generatedFiles?: GeneratedFile[];
     analysisTable?: AnalysisTable | null;
     analysisFile?: { name: string; base64: string } | null;
+    chartImage?: { base64: string; mime: string } | null;
     warning?: string | null;
 }
 
@@ -303,6 +304,7 @@ export default function ChatPage() {
                 generatedFiles: data.generatedFiles || [],
                 analysisTable: data.analysisTable,
                 analysisFile: data.analysisFile,
+                chartImage: data.chartImage,
                 warning: data.warning,
             };
             setMessages((prev) => [...prev, botMessage]);
@@ -458,6 +460,15 @@ export default function ChatPage() {
                                             </div>
                                         )}
 
+                                        {m.chartImage && (
+                                            <div className="mt-3 overflow-hidden rounded-[var(--radius-control)] border border-navy-100">
+                                                <img
+                                                    src={`data:${m.chartImage.mime};base64,${m.chartImage.base64}`}
+                                                    alt="Grafik hasil visualisasi data"
+                                                    className="w-full"
+                                                />
+                                            </div>
+                                        )}
                                         {m.analysisTable && (
                                             <div className="mt-3">
                                                 <CopyableTable>

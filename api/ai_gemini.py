@@ -693,8 +693,203 @@ ATURAN WAJIB:
     return response.text or ""
 
 
-def create_docx_bytes(title: str, content: str, logo_bytes: bytes = None) -> bytes:
-    """Ubah teks jadi file .docx dari nol (tanpa template), opsional logo di kop."""
+def detect_requested_format(question: str) -> str:
+    """Tebak format file yang diminta user secara eksplisit lewat kata kunci
+    -- default 'docx_pdf' (perilaku lama: selalu dua-duanya) kalau tidak
+    ada sinyal format spesifik."""
+    q = question.lower()
+    xlsx_keywords = ["excel", "xlsx", "spreadsheet", "dalam bentuk tabel excel", "format excel"]
+    pptx_keywords = ["powerpoint", "power point", "pptx", "ppt", "slide", "presentasi", "bahan presentasi"]
+    if any(kw in q for kw in xlsx_keywords):
+        return "xlsx"
+    if any(kw in q for kw in pptx_keywords):
+        return "pptx"
+    return "docx_pdf"
+
+
+def generate_draft_table_data(topic: str, doc_type: str = "Lainnya") -> dict:
+    """Untuk permintaan generate dalam format Excel -- AI langsung mengarang
+    STRUKTUR TABEL (kolom + baris) yang masuk akal buat topik itu, BUKAN
+    ekstrak dari dokumen (beda dengan extract_fields_from_document).
+    Contoh: 'buatkan checklist onboarding karyawan baru dalam bentuk excel'
+    -> AI bikin kolom ['No','Tugas','Penanggung Jawab','Status'] + baris-barisnya."""
+    prompt = f"""Buat draf TABEL kerja untuk sebuah perusahaan, jenis dokumen: {doc_type}.
+Topik: {topic}
+
+Tentukan kolom yang relevan dan isi baris-barisnya (boleh berisi placeholder yang wajar
+kalau detail spesifik tidak bisa dipastikan, mis. "[isi sesuai kebijakan internal]").
+Buat MINIMAL 3 baris, MAKSIMAL 15 baris.
+
+Jawab HANYA dengan JSON, tanpa markdown code block, format persis:
+{{"columns": ["Kolom1", "Kolom2", ...], "rows": [{{"Kolom1": "...", "Kolom2": "..."}}, ...]}}
+"""
+    response = _generate_with_fallback(prompt)
+    raw = (response.text or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+    import json
+
+    return json.loads(raw)
+
+
+def generate_draft_slides(topic: str, doc_type: str = "Lainnya") -> list:
+    """Untuk permintaan generate dalam format PowerPoint -- AI mengarang
+    struktur slide (judul + poin-poin per slide), BUKAN paragraf panjang
+    ala dokumen Word. Return list of {"title": str, "bullets": [str, ...]}."""
+    prompt = f"""Buat draf PRESENTASI kerja untuk sebuah perusahaan, jenis: {doc_type}.
+Topik: {topic}
+
+Susun 5-8 slide. Tiap slide punya judul singkat dan 2-5 poin (bukan paragraf panjang,
+kalimat pendek ala presentasi). Slide pertama = judul presentasi (bullets boleh kosong).
+
+Jawab HANYA dengan JSON array, tanpa markdown code block, format persis:
+[{{"title": "...", "bullets": ["...", "..."]}}, ...]
+"""
+    response = _generate_with_fallback(prompt)
+    raw = (response.text or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+    import json
+
+    return json.loads(raw)
+
+
+def create_pptx_bytes(title: str, slides: list, logo_bytes: bytes = None) -> bytes:
+    """Bikin file .pptx dari struktur slide (list of {title, bullets})."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    import io
+
+    prs = Presentation()
+    title_layout = prs.slide_layouts[0]
+    bullet_layout = prs.slide_layouts[1]
+
+    first = prs.slides.add_slide(title_layout)
+    first.shapes.title.text = title
+    if len(first.placeholders) > 1:
+        first.placeholders[1].text = "[DRAF AI -- PERLU DIREVIEW SEBELUM DIGUNAKAN RESMI]"
+    if logo_bytes:
+        try:
+            first.shapes.add_picture(io.BytesIO(logo_bytes), Inches(8.3), Inches(0.3), height=Inches(0.8))
+        except Exception:
+            pass
+
+    for slide_data in slides:
+        slide = prs.slides.add_slide(bullet_layout)
+        slide.shapes.title.text = slide_data.get("title", "")
+        body = slide.placeholders[1].text_frame
+        bullets = slide_data.get("bullets", [])
+        if bullets:
+            body.text = bullets[0]
+            for b in bullets[1:]:
+                p = body.add_paragraph()
+                p.text = b
+                p.level = 0
+
+    buffer = io.BytesIO()
+    prs.save(buffer)
+    return buffer.getvalue()
+
+
+def create_chart_image_bytes(
+    chart_type: str, labels: list, values: list, title: str = ""
+) -> bytes:
+    """Bikin 1 gambar chart (PNG) dari data label+angka -- dipakai buat
+    ditempel ke dokumen yang di-generate ATAU ditampilkan langsung inline
+    di chat. chart_type: 'bar' | 'line' | 'pie'."""
+    import matplotlib
+    matplotlib.use("Agg")  # tanpa display, cuma buat render ke file -- wajib di server
+    import matplotlib.pyplot as plt
+    import io
+
+    fig, ax = plt.subplots(figsize=(7, 4.2), dpi=150)
+    colors = ["#0f172a", "#1e40af", "#0369a1", "#0891b2", "#059669", "#65a30d", "#ca8a04", "#dc2626"]
+
+    if chart_type == "pie":
+        ax.pie(values, labels=labels, autopct="%1.1f%%", colors=colors[: len(labels)])
+        ax.axis("equal")
+    elif chart_type == "line":
+        ax.plot(labels, values, marker="o", color=colors[0], linewidth=2)
+        ax.grid(axis="y", linestyle="--", alpha=0.4)
+        plt.xticks(rotation=30, ha="right")
+    else:  # bar (default, paling aman buat data kategori-angka apapun)
+        ax.bar(labels, values, color=colors[: len(labels)] if len(labels) <= len(colors) else colors[0])
+        ax.grid(axis="y", linestyle="--", alpha=0.4)
+        plt.xticks(rotation=30, ha="right")
+
+    if title:
+        ax.set_title(title, fontsize=13, fontweight="bold", color="#0f172a")
+    fig.tight_layout()
+
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="png", transparent=False, facecolor="white")
+    plt.close(fig)
+    return buffer.getvalue()
+
+
+def is_chart_request(question: str) -> bool:
+    """Deteksi niat: user minta VISUALISASI (grafik/chart/diagram), bukan
+    cuma tabel data mentah -- dipakai bareng compile/analysis request buat
+    memutuskan apakah perlu bikin gambar chart juga."""
+    keywords = [
+        "grafik", "chart", "visualisasi", "visualisasikan", "diagram",
+        "pie chart", "bar chart", "diagramkan", "plot data", "grafikkan",
+    ]
+    q = question.lower()
+    return any(kw in q for kw in keywords)
+
+
+def suggest_chart_from_table(question: str, columns: list, rows: list) -> dict:
+    """AI pilih kolom label + kolom angka mana yang paling masuk akal buat
+    dijadikan chart dari tabel yang ada, plus jenis chart yang cocok.
+    Fallback ke heuristik sederhana (kolom teks pertama + kolom angka
+    pertama) kalau AI gagal/format tidak valid."""
+    sample = rows[:5]
+    prompt = f"""Tabel data (kolom: {columns}), contoh baris: {sample}
+Pertanyaan user: "{question}"
+
+Kolom mana yang paling cocok jadi LABEL (sumbu kategori) dan kolom mana yang paling cocok
+jadi NILAI (angka) untuk divisualisasikan sebagai chart? Tentukan juga jenis chart yang
+paling cocok: "bar", "line", atau "pie".
+
+Jawab HANYA dengan JSON, tanpa markdown code block:
+{{"label_column": "...", "value_column": "...", "chart_type": "bar"}}
+"""
+    try:
+        response = _generate_with_fallback(prompt)
+        raw = (response.text or "").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        import json
+
+        result = json.loads(raw)
+        if result.get("label_column") in columns and result.get("value_column") in columns:
+            return result
+    except Exception:
+        pass
+
+    # Fallback heuristik: kolom teks pertama = label, kolom angka pertama = value
+    label_col = columns[0] if columns else None
+    value_col = None
+    for c in columns[1:]:
+        sample_val = str(rows[0].get(c, "")) if rows else ""
+        if sample_val.replace(".", "", 1).replace("-", "", 1).isdigit():
+            value_col = c
+            break
+    return {"label_column": label_col, "value_column": value_col or (columns[1] if len(columns) > 1 else columns[0]), "chart_type": "bar"}
+
+
+def create_docx_bytes(title: str, content: str, logo_bytes: bytes = None, chart_bytes: bytes = None) -> bytes:
+    """Ubah teks jadi file .docx dari nol (tanpa template), opsional logo di kop + chart di akhir."""
     from docx import Document
     from docx.shared import Inches
     import io
@@ -718,6 +913,12 @@ def create_docx_bytes(title: str, content: str, logo_bytes: bytes = None) -> byt
             doc.add_heading(line.lstrip("#").strip(), level=2)
         else:
             doc.add_paragraph(line)
+
+    if chart_bytes:
+        try:
+            doc.add_picture(io.BytesIO(chart_bytes), width=Inches(5.5))
+        except Exception:
+            pass  # chart gagal ditempel -> tetap lanjut, dokumen teks tetap terbentuk
 
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -753,8 +954,8 @@ def create_docx_from_template(template_bytes: bytes, title: str, content: str) -
     return buffer.getvalue()
 
 
-def create_pdf_bytes(title: str, content: str, logo_bytes: bytes = None) -> bytes:
-    """Ubah teks jadi file .pdf sungguhan, opsional logo di kop."""
+def create_pdf_bytes(title: str, content: str, logo_bytes: bytes = None, chart_bytes: bytes = None) -> bytes:
+    """Ubah teks jadi file .pdf sungguhan, opsional logo di kop + chart di akhir."""
     from reportlab.lib.pagesizes import A4
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
     from reportlab.lib.styles import getSampleStyleSheet
@@ -792,6 +993,12 @@ def create_pdf_bytes(title: str, content: str, logo_bytes: bytes = None) -> byte
             else styles["Normal"]
         )
         story.append(Paragraph(line.lstrip("#").strip(), style))
+    if chart_bytes:
+        try:
+            story.append(Spacer(1, 16))
+            story.append(Image(io.BytesIO(chart_bytes), width=14 * cm, height=8.4 * cm))
+        except Exception:
+            pass  # chart gagal ditempel -> tetap lanjut, dokumen teks tetap terbentuk
     doc.build(story)
     return buffer.getvalue()
 

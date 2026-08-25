@@ -34,29 +34,39 @@ export default function SettingsPage() {
         }
     };
 
-    // Slider di-drag bebas dulu di UI (state lokal, tanpa nembak API tiap
-    // gerakan mouse) -- baru di-commit ke backend saat user lepas slider
-    // (onMouseUp/onTouchEnd/onChange final), supaya tidak spam PATCH.
-    const [deadlineDraft, setDeadlineDraft] = useState<number | null>(null);
+    // Batas waktu diedit bebas dulu di state lokal (time picker HH:MM),
+    // BARU dikirim ke server saat tombol "Simpan" diklik -- BEDA dari
+    // toggle di atas yang auto-save, supaya user yakin dulu jamnya benar
+    // sebelum ke-apply (jam 17:00 vs 07:00 gampang salah pencet di time picker).
+    const [deadlineDraft, setDeadlineDraft] = useState<string | null>(null); // format "HH:MM"
+    const [deadlineSaveMsg, setDeadlineSaveMsg] = useState<string | null>(null);
     useEffect(() => {
         if (settings && deadlineDraft === null) {
-            setDeadlineDraft(settings.attendance_deadline_hour ?? 24);
+            const h = String(settings.attendance_deadline_hour ?? 24).padStart(2, "0");
+            const m = String(settings.attendance_deadline_minute ?? 0).padStart(2, "0");
+            setDeadlineDraft(`${h === "24" ? "23" : h}:${h === "24" ? "59" : m}`);
         }
     }, [settings]);
 
-    const commitDeadline = async (value: number) => {
-        if (!settings) return;
-        const prev = settings.attendance_deadline_hour;
-        setSettings({ ...settings, attendance_deadline_hour: value }); // optimistic
+    const isDeadlineDirty =
+        settings && deadlineDraft &&
+        deadlineDraft !== `${String(settings.attendance_deadline_hour ?? 24).padStart(2, "0")}:${String(settings.attendance_deadline_minute ?? 0).padStart(2, "0")}`;
+
+    const saveDeadline = async () => {
+        if (!settings || !deadlineDraft) return;
+        const [hStr, mStr] = deadlineDraft.split(":");
+        const hour = Number(hStr), minute = Number(mStr);
         setSavingKey("attendance_deadline_hour");
+        setDeadlineSaveMsg(null);
         try {
-            await apiJson("/api/settings/company", {
+            const updated = await apiJson("/api/settings/company", {
                 method: "PATCH",
-                body: JSON.stringify({ attendance_deadline_hour: value }),
+                body: JSON.stringify({ attendance_deadline_hour: hour, attendance_deadline_minute: minute }),
             });
-        } catch {
-            setSettings({ ...settings, attendance_deadline_hour: prev }); // rollback
-            setDeadlineDraft(prev);
+            setSettings(updated.settings);
+            setDeadlineSaveMsg("Tersimpan.");
+        } catch (e: any) {
+            setDeadlineSaveMsg(e.message || "Gagal menyimpan.");
         } finally {
             setSavingKey((k) => (k === "attendance_deadline_hour" ? null : k));
         }
@@ -152,32 +162,33 @@ export default function SettingsPage() {
                                 <div className="flex items-start gap-2.5">
                                     <Clock className="mt-0.5 h-4 w-4 text-ink-faint" />
                                     <div className="flex-1">
-                                        <div className="flex items-center justify-between">
-                                            <p className="text-sm font-medium text-ink">Batas Waktu Lapor Harian</p>
-                                            <span className="rounded-full bg-navy-900 px-2.5 py-0.5 text-2xs font-bold text-white">
-                                                {deadlineDraft ?? settings.attendance_deadline_hour ?? 24}:00
-                                            </span>
-                                        </div>
+                                        <p className="text-sm font-medium text-ink">Batas Waktu Lapor Harian</p>
                                         <p className="mb-3 text-xs text-ink-faint">
-                                            Karyawan dianggap terlambat kalau belum isi Form Kehadiran/Lapor Kerjaan sebelum jam ini.
+                                            Jam berapa karyawan dianggap TERLAMBAT kalau belum isi Form Kehadiran/Lapor Kerjaan
+                                            hari itu (jam WIB). Setelah lewat jam ini, sistem mulai mengirim pengingat.
                                         </p>
-                                        <input
-                                            type="range"
-                                            min={1}
-                                            max={24}
-                                            step={1}
-                                            value={deadlineDraft ?? settings.attendance_deadline_hour ?? 24}
-                                            onChange={(e) => setDeadlineDraft(Number(e.target.value))}
-                                            onMouseUp={(e) => commitDeadline(Number((e.target as HTMLInputElement).value))}
-                                            onTouchEnd={(e) => commitDeadline(Number((e.target as HTMLInputElement).value))}
-                                            disabled={savingKey === "attendance_deadline_hour"}
-                                            className="h-2 w-full cursor-pointer appearance-none rounded-full bg-navy-100 accent-navy-900 disabled:cursor-not-allowed disabled:opacity-50"
-                                        />
-                                        <div className="mt-1 flex justify-between text-2xs text-ink-faint">
-                                            <span>01:00</span>
-                                            <span>12:00</span>
-                                            <span>24:00</span>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="time"
+                                                value={deadlineDraft ?? "23:59"}
+                                                onChange={(e) => setDeadlineDraft(e.target.value)}
+                                                disabled={savingKey === "attendance_deadline_hour"}
+                                                className="rounded-[var(--radius-control)] border border-navy-100 bg-white px-3 py-2 text-sm text-ink disabled:opacity-50"
+                                            />
+                                            <button
+                                                onClick={saveDeadline}
+                                                disabled={!isDeadlineDirty || savingKey === "attendance_deadline_hour"}
+                                                className="rounded-[var(--radius-control)] bg-navy-900 px-4 py-2 text-xs font-semibold text-white hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                                {savingKey === "attendance_deadline_hour" ? "Menyimpan..." : "Simpan"}
+                                            </button>
+                                            {deadlineSaveMsg && !isDeadlineDirty && (
+                                                <span className="text-2xs font-medium text-green-600">{deadlineSaveMsg}</span>
+                                            )}
                                         </div>
+                                        {isDeadlineDirty && (
+                                            <p className="mt-1.5 text-2xs text-amber-600">Belum disimpan -- klik "Simpan" supaya perubahan berlaku.</p>
+                                        )}
                                     </div>
                                 </div>
                             </div>

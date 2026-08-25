@@ -14,6 +14,9 @@ export function EmployeeDirectoryBody() {
   const [users, setUsers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [employeePage, setEmployeePage] = useState(1);
+  const [groupByFolder, setGroupByFolder] = useState(false);
+  const EMP_PAGE_SIZE = 20;
 
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [tab, setTab] = useState<Tab>("chat");
@@ -414,52 +417,109 @@ export function EmployeeDirectoryBody() {
   }
 
   // ---------- DAFTAR KARYAWAN ----------
+  const groupedByFolder: Record<string, any[]> = {};
+  for (const u of filteredUsers) {
+    const key = u.folder_access || "/";
+    (groupedByFolder[key] ||= []).push(u);
+  }
+  const folderGroups = Object.keys(groupedByFolder).sort();
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / EMP_PAGE_SIZE));
+  const paginatedUsers = filteredUsers.slice((employeePage - 1) * EMP_PAGE_SIZE, employeePage * EMP_PAGE_SIZE);
+
+  const renderRow = (u: any) => (
+    <button
+      key={u.email}
+      onClick={() => openEmployee(u)}
+      className="flex w-full flex-col gap-1 border-b border-navy-50 px-4 py-3 text-left last:border-0 hover:bg-navy-50/60 sm:grid sm:grid-cols-[1fr_140px_120px_160px] sm:items-center sm:gap-0"
+    >
+      <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-ink">
+        <Mail className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+        <span className="truncate">{u.full_name ? `${u.full_name} · ${u.email}` : u.email}</span>
+      </span>
+      <span className="flex items-center gap-1.5 text-xs text-ink-muted">
+        <Briefcase className="h-3 w-3" /> {u.position_title || "-"}
+      </span>
+      <span className="flex items-center gap-1.5 text-xs text-ink-muted">
+        <Shield className="h-3 w-3" /> {u.role}
+      </span>
+      <span className="flex items-center gap-1.5 font-mono-data text-2xs text-ink-faint">
+        <FolderOpen className="h-3 w-3" /> {u.folder_access}
+      </span>
+    </button>
+  );
+
   return (
     <div className="space-y-3">
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Cari email, jabatan, atau role..."
-          className="w-full rounded-[var(--radius-control)] border border-navy-100 py-2 pl-9 pr-3 text-xs focus:border-navy-500 focus:outline-none"
-        />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="relative max-w-sm flex-1">
+          <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" />
+          <input
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setEmployeePage(1); }}
+            placeholder="Cari email, jabatan, atau role..."
+            className="w-full rounded-[var(--radius-control)] border border-navy-100 py-2 pl-9 pr-3 text-xs focus:border-navy-500 focus:outline-none"
+          />
+        </div>
+        <button
+          onClick={() => setGroupByFolder((v) => !v)}
+          className={cn(
+            "flex items-center gap-1.5 rounded-[var(--radius-control)] border px-3 py-2 text-2xs font-semibold",
+            groupByFolder ? "border-navy-900 bg-navy-900 text-white" : "border-navy-100 text-ink-muted hover:bg-navy-50"
+          )}
+        >
+          <Users className="h-3.5 w-3.5" /> Kelompokkan per Folder Akses
+        </button>
       </div>
 
       {isLoading ? (
         <p className="text-xs text-ink-faint">Memuat daftar karyawan...</p>
       ) : filteredUsers.length === 0 ? (
         <p className="text-xs text-ink-faint">{search ? "Tidak ada karyawan yang cocok." : "Belum ada karyawan."}</p>
-      ) : (
-        <div className="overflow-hidden rounded-[var(--radius-card)] border border-navy-100 bg-white">
-          <div className="hidden border-b border-navy-100 bg-navy-50/50 px-4 py-2 text-2xs font-semibold uppercase tracking-wide text-ink-faint sm:grid sm:grid-cols-[1fr_140px_120px_160px]">
-            <span>Email</span>
-            <span>Jabatan</span>
-            <span>Role</span>
-            <span>Folder Akses</span>
-          </div>
-          {filteredUsers.map((u: any) => (
-            <button
-              key={u.email}
-              onClick={() => openEmployee(u)}
-              className="flex w-full flex-col gap-1 border-b border-navy-50 px-4 py-3 text-left last:border-0 hover:bg-navy-50/60 sm:grid sm:grid-cols-[1fr_140px_120px_160px] sm:items-center sm:gap-0"
-            >
-              <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-ink">
-                <Mail className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
-                <span className="truncate">{u.full_name ? `${u.full_name} · ${u.email}` : u.email}</span>
-              </span>
-              <span className="flex items-center gap-1.5 text-xs text-ink-muted">
-                <Briefcase className="h-3 w-3" /> {u.position_title || "-"}
-              </span>
-              <span className="flex items-center gap-1.5 text-xs text-ink-muted">
-                <Shield className="h-3 w-3" /> {u.role}
-              </span>
-              <span className="flex items-center gap-1.5 font-mono-data text-2xs text-ink-faint">
-                <FolderOpen className="h-3 w-3" /> {u.folder_access}
-              </span>
-            </button>
+      ) : groupByFolder ? (
+        <div className="space-y-4">
+          {folderGroups.map((folderPath) => (
+            <div key={folderPath}>
+              <p className="mb-1.5 flex items-center gap-1.5 font-mono-data text-2xs font-semibold text-ink-faint">
+                <FolderOpen className="h-3.5 w-3.5" /> {folderPath} <span className="text-ink-faint">({groupedByFolder[folderPath].length} orang)</span>
+              </p>
+              <div className="overflow-hidden rounded-[var(--radius-card)] border border-navy-100 bg-white">
+                {groupedByFolder[folderPath].map(renderRow)}
+              </div>
+            </div>
           ))}
         </div>
+      ) : (
+        <>
+          <div className="overflow-hidden rounded-[var(--radius-card)] border border-navy-100 bg-white">
+            <div className="hidden border-b border-navy-100 bg-navy-50/50 px-4 py-2 text-2xs font-semibold uppercase tracking-wide text-ink-faint sm:grid sm:grid-cols-[1fr_140px_120px_160px]">
+              <span>Email</span>
+              <span>Jabatan</span>
+              <span>Role</span>
+              <span>Folder Akses</span>
+            </div>
+            {paginatedUsers.map(renderRow)}
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => setEmployeePage((p) => Math.max(1, p - 1))}
+                disabled={employeePage === 1}
+                className="rounded border border-navy-100 bg-white px-3 py-1.5 text-xs font-medium text-ink-muted disabled:opacity-40"
+              >
+                Sebelumnya
+              </button>
+              <span className="text-xs text-ink-faint">Halaman {employeePage} dari {totalPages} ({filteredUsers.length} karyawan)</span>
+              <button
+                onClick={() => setEmployeePage((p) => Math.min(totalPages, p + 1))}
+                disabled={employeePage === totalPages}
+                className="rounded border border-navy-100 bg-white px-3 py-1.5 text-xs font-medium text-ink-muted disabled:opacity-40"
+              >
+                Selanjutnya
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

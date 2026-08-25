@@ -45,6 +45,49 @@ def normalize_folder(path: str) -> str:
     return path
 
 
+def get_fresh_file_url(stored_url: str, ttl_seconds: int = 3600 * 24 * 7) -> str:
+    """PERBAIKAN BUG: signed URL Supabase Storage SELALU ada batas waktu
+    (tidak bisa dibikin permanen) -- URL yang disimpan langsung di kolom
+    file_url pas upload bakal kedaluwarsa cepat atau lambat, bikin error
+    'File not found' / InvalidJWT 'exp claim timestamp check failed' saat
+    dokumen dibuka lama setelah upload (dokumen upload awal cuma dikasih
+    7 hari, sebagian lain 30-365 hari -- semua akan expired juga akhirnya).
+
+    Fungsi ini AMBIL storage_path dari signed URL yang tersimpan (path-nya
+    tetap valid walau TOKEN di URL itu sudah expired), lalu generate
+    signed URL BARU yang fresh. Dipanggil setiap kali file_url mau
+    dikirim ke frontend (bukan cuma sekali pas upload), jadi dokumen lama
+    otomatis "sembuh" sendiri tanpa perlu migrasi/backfill data lama."""
+    if not stored_url or "/object/sign/" not in stored_url:
+        return stored_url  # bukan signed URL Supabase (mis. link YouTube) -- kembalikan apa adanya
+
+    import re
+    import urllib.parse
+
+    match = re.search(r"/object/sign/([^/]+)/([^?]+)", stored_url)
+    if not match:
+        return stored_url
+    bucket, encoded_path = match.group(1), match.group(2)
+    storage_path = urllib.parse.unquote(encoded_path)
+
+    try:
+        client = get_client()
+        signed = client.storage.from_(bucket).create_signed_url(storage_path, ttl_seconds)
+        fresh_url = signed.get("signedURL") or signed.get("signed_url")
+        return fresh_url or stored_url
+    except Exception:
+        return stored_url  # gagal re-sign (mis. file storage-nya memang sudah dihapus) -- kembalikan URL lama, biar error-nya jelas kelihatan di frontend daripada disembunyikan
+
+
+def refresh_file_urls(items: list, key: str = "file_url") -> list:
+    """Helper buat refresh file_url di banyak baris sekaligus (list dokumen,
+    lampiran form, dst) -- item tanpa file_url dilewati begitu saja."""
+    for item in items:
+        if item.get(key):
+            item[key] = get_fresh_file_url(item[key])
+    return items
+
+
 # ==========================================
 # COMPANY & AUTH
 # ==========================================
@@ -208,7 +251,7 @@ def insert_document_with_chunks(
             )
             signed = client.storage.from_("company-files").create_signed_url(
                 storage_path,
-                3600 * 24 * 7,  # berlaku 7 hari, di-generate ulang tiap dibuka
+                3600 * 24 * 30,  # 30 hari -- di-refresh otomatis tiap dibaca lewat db.refresh_file_urls(), TTL ini cuma jaring pengaman tambahan
             )
             file_url = signed.get("signedURL") or signed.get("signed_url")
         except Exception as e:
@@ -298,9 +341,37 @@ def create_folder(company_id: str, path: str):
     ).execute()
 
 
-def delete_folder_and_contents(company_id: str, folder_path: str):
+def delete_folder_and_contents(company_id: str, folder_path: str) -> dict:
+    """Hapus folder + seluruh isinya (dokumen & subfolder) secara rekursif.
+
+    PERBAIKAN: sebelumnya kalau ada karyawan yang folder_access-nya persis
+    folder ini (atau di bawahnya), akses mereka jadi "yatim" -- masih
+    tersimpan sebagai path yang sudah tidak ada, tapi tidak ada peringatan
+    apa pun, Chat KOS/File Manager mereka diam-diam jadi kosong tanpa
+    penjelasan. Sekarang karyawan yang kena dampak OTOMATIS dipindahkan ke
+    folder INDUK (1 tingkat di atas folder yang dihapus, atau root "/"
+    kalau yang dihapus itu folder root) supaya tidak pernah benar-benar
+    terkunci tanpa akses. Return jumlah karyawan yang terdampak supaya
+    Admin diberi tahu di UI."""
     client = get_client()
     folder_path = normalize_folder(folder_path)
+
+    # Folder induk = 1 tingkat di atas -- kalau folder_path = "/A/B/", induknya "/A/"
+    segments = [s for s in folder_path.split("/") if s]
+    parent_path = normalize_folder("/" + "/".join(segments[:-1])) if len(segments) > 1 else "/"
+
+    affected_r = (
+        client.table("users")
+        .select("email")
+        .eq("company_id", company_id)
+        .ilike("folder_access", f"{folder_path}%")
+        .execute()
+    )
+    affected_emails = [u["email"] for u in affected_r.data]
+    if affected_emails:
+        client.table("users").update({"folder_access": parent_path}).eq(
+            "company_id", company_id
+        ).ilike("folder_access", f"{folder_path}%").execute()
 
     client.table("documents").delete().eq("company_id", company_id).ilike(
         "folder_path", f"{folder_path}%"
@@ -308,6 +379,8 @@ def delete_folder_and_contents(company_id: str, folder_path: str):
     client.table("folders").delete().eq("company_id", company_id).ilike(
         "path", f"{folder_path}%"
     ).execute()
+
+    return {"affected_users": affected_emails, "reassigned_to": parent_path}
 
 
 def list_child_folders(company_id: str, parent_path: str) -> list:
@@ -354,6 +427,33 @@ def list_documents_in_folder(
     return r.data, (r.count or 0)
 
 
+def get_folder_tree_stats(company_id: str, folder_path: str) -> dict:
+    """Total dokumen + subfolder di SELURUH pohon folder (rekursif ke bawah),
+    BEDA dengan list_documents_in_folder yang cuma hitung isi langsung di
+    1 folder itu saja. Dipakai kartu ringkasan folder di Dashboard supaya
+    tidak menyesatkan (mis. folder dengan 0 dokumen langsung tapi punya
+    5 subfolder isi 40 dokumen sebelumnya kelihatan 'kosong')."""
+    client = get_client()
+    folder_path = normalize_folder(folder_path)
+
+    doc_r = (
+        client.table("documents")
+        .select("id", count="exact")
+        .eq("company_id", company_id)
+        .ilike("folder_path", f"{folder_path}%")
+        .execute()
+    )
+    folder_r = (
+        client.table("folders")
+        .select("path", count="exact")
+        .eq("company_id", company_id)
+        .ilike("path", f"{folder_path}%")
+        .neq("path", folder_path)  # jangan hitung folder itu sendiri sebagai "subfolder"
+        .execute()
+    )
+    return {"doc_count": doc_r.count or 0, "subfolder_count": folder_r.count or 0}
+
+
 def count_all_documents(company_id: str) -> int:
     """Total dokumen di SELURUH folder milik company -- dipakai Dashboard.
     Beda dengan list_documents_in_folder yang sengaja cuma hitung 1 folder
@@ -380,16 +480,20 @@ def create_chat_session(user_email: str, company_id: str) -> str:
     return r.data[0]["id"]
 
 
-def list_chat_sessions(user_email: str):
+def list_chat_sessions(user_email: str, page: int = 1, page_size: int = 30):
+    """Dipaginasi -- tanpa ini, user yang sudah lama pakai KOS (ratusan
+    percakapan) bakal me-load SEMUA riwayat chat sekaligus di sidebar."""
     client = get_client()
+    offset = (page - 1) * page_size
     r = (
         client.table("chat_sessions")
-        .select("*")
+        .select("*", count="exact")
         .eq("user_email", user_email)
         .order("updated_at", desc=True)
+        .range(offset, offset + page_size - 1)
         .execute()
     )
-    return r.data
+    return r.data, (r.count or 0)
 
 
 def get_chat_messages(session_id: str):
@@ -401,7 +505,16 @@ def get_chat_messages(session_id: str):
         .order("created_at")
         .execute()
     )
-    return r.data
+    messages = r.data
+    # PERBAIKAN BUG "File not found": file_url di kolom "sources" (JSONB)
+    # dibekukan sejak pesan itu dikirim -- kalau chat-nya dibuka lagi
+    # berhari-hari/berbulan kemudian, URL itu sudah pasti kedaluwarsa.
+    # Di-refresh di sini tiap riwayat chat dimuat, BUKAN pas disimpan
+    # (supaya tidak perlu update kolom sources di DB tiap kali).
+    for m in messages:
+        if m.get("sources"):
+            m["sources"] = refresh_file_urls(m["sources"])
+    return messages
 
 
 def add_chat_message(session_id: str, role: str, content: str, sources: list = None):
@@ -631,6 +744,7 @@ def get_company_settings(company_id: str) -> dict:
         "poin_pelanggaran_enabled": False,
         "notify_atasan_enabled": False,
         "attendance_deadline_hour": 24,
+        "attendance_deadline_minute": 0,
     }
 
 
@@ -719,8 +833,12 @@ def get_attendance_status_today(company_id: str) -> dict:
 
 
 def _today_str() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    """Tanggal 'hari ini' dalam WIB (UTC+7), BUKAN UTC -- kalau pakai
+    tanggal UTC mentah, antara jam 00:00-06:59 WIB sistem masih mengira
+    'hari ini' itu tanggal kemarin (karena UTC baru ganti tanggal jam
+    07:00 WIB), bikin submission Form Kehadiran/Lapor Kerjaan dini hari
+    bisa salah tercatat di tanggal yang salah."""
+    return _now_wib().strftime("%Y-%m-%d")
 
 
 def update_admin_permission(email: str, permission_level: str):
@@ -793,18 +911,20 @@ def create_quiz(
     return r.data[0]["id"]
 
 
-def list_quizzes_for_folder(company_id: str, folder_access: str):
-    """Kuis yang tersedia untuk karyawan sesuai cakupan folder aksesnya."""
+def list_quizzes_for_folder(company_id: str, folder_access: str, page: int = 1, page_size: int = 20):
+    """Kuis yang tersedia untuk karyawan sesuai cakupan folder aksesnya -- dipaginasi."""
     client = get_client()
+    offset = (page - 1) * page_size
     r = (
         client.table("quizzes")
-        .select("id, title, folder_path, passing_score, created_at")
+        .select("id, title, folder_path, passing_score, created_at", count="exact")
         .eq("company_id", company_id)
         .like("folder_path", f"{folder_access}%")
         .order("created_at", desc=True)
+        .range(offset, offset + page_size - 1)
         .execute()
     )
-    return r.data
+    return r.data, (r.count or 0)
 
 
 def get_quiz(quiz_id: str):
@@ -872,8 +992,12 @@ def save_ai_draft(company_id: str, requested_by: str, title: str, content: str) 
 # ANALISIS DATA -- dokumen dengan data terstruktur (XLSX)
 # ==========================================
 def list_structured_documents(company_id: str, folder_prefix: str = "/"):
-    """Dokumen yang punya structured_data (hasil upload XLSX) -- untuk halaman Analisis Data."""
+    """Dokumen yang punya structured_data (hasil upload XLSX) -- untuk halaman
+    Insight & Grafik. folder_prefix di-normalize dulu (pastikan format
+    '/path/' konsisten) sebelum dipakai LIKE prefix-match, supaya SEMUA
+    subfolder di bawahnya ikut tersisir -- bukan cuma folder root."""
     client = get_client()
+    folder_prefix = normalize_folder(folder_prefix)
     r = (
         client.table("documents")
         .select("id, title, folder_path, structured_data")
@@ -926,7 +1050,14 @@ def get_company_branding(company_id: str) -> dict:
         .eq("id", company_id)
         .execute()
     )
-    return r.data[0] if r.data else {}
+    if not r.data:
+        return {}
+    branding = r.data[0]
+    if branding.get("logo_url"):
+        branding["logo_url"] = get_fresh_file_url(branding["logo_url"])
+    if branding.get("docx_template_url"):
+        branding["docx_template_url"] = get_fresh_file_url(branding["docx_template_url"])
+    return branding
 
 
 def upload_company_logo(company_id: str, file_bytes: bytes, filename: str) -> str:
@@ -1206,20 +1337,34 @@ def get_today_submission(template_id: str, user_email: str, company_id: str):
         .eq("submission_id", submission["id"])
         .execute()
     )
-    submission["answers"] = answers.data
+    submission["answers"] = refresh_file_urls(answers.data, key="file_url")
     return submission
 
 
+def _now_wib():
+    """Jam sekarang di WIB (UTC+7) -- KOS dipakai perusahaan Indonesia, dan
+    Admin mengisi 'Batas Waktu Lapor Harian' di Pengaturan dalam jam lokal
+    (mis. 17 = jam 5 sore WIB), BUKAN UTC. Sebelumnya kode ini salah
+    membandingkan jam UTC mentah terhadap deadline yang diisi dalam jam
+    lokal -- akibatnya reminder nyaris tidak PERNAH terkirim di jam kerja
+    (selisih 7 jam bikin kondisinya baru terpenuhi dini hari WIB, saat
+    tidak ada yang buka dashboard), dan kalau deadline dibiarkan default
+    24, kondisinya malah TIDAK PERNAH terpenuhi sama sekali sepanjang
+    hari (jam cuma 0-23, tidak pernah >= 24). Ini penyebab persis laporan
+    'klik tombol pengingat, tidak ada notif sama sekali'."""
+    from datetime import datetime, timezone, timedelta
+    return datetime.now(timezone.utc) + timedelta(hours=7)
+
+
 def submit_daily_form(
-    template_id: str, user_email: str, company_id: str, answers: list, deadline_hour: int = 24,
+    template_id: str, user_email: str, company_id: str, answers: list, deadline_hour: int = 24, deadline_minute: int = 0,
 ):
     """Idempotent per hari (unique constraint template+user+tanggal) --
     kalau sudah pernah isi hari ini, jawaban lama ditimpa (mengganti isian,
     bukan bikin submission dobel)."""
     client = get_client()
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
-    status = "late" if now.hour >= deadline_hour else "on_time"
+    now = _now_wib()
+    status = "late" if (now.hour, now.minute) >= (deadline_hour, deadline_minute) else "on_time"
 
     existing = (
         client.table("form_submissions")
@@ -1268,9 +1413,20 @@ def submit_daily_form(
 def get_submission_status_today(company_id: str, template_id: str) -> dict:
     """Dipakai Dashboard Owner/atasan -- gabungan dari get_attendance_status_today
     lama: siapa SUDAH dan BELUM isi form hari ini. SuperAdmin dikecualikan
-    dari daftar 'belum' (tidak wajib lapor), tetap boleh isi kalau mau."""
+    dari daftar 'belum' (tidak wajib lapor), tetap boleh isi kalau mau.
+
+    Ikut mengembalikan deadline_hour + is_past_deadline supaya frontend
+    bisa membedakan 'belum isi (masih wajar, belum lewat jam batas)' vs
+    'belum isi (SUDAH terlambat)' -- sebelumnya daftar 'belum' ini selalu
+    tampil mengkhawatirkan (ikon jam oranye) sejak jam 00:00, padahal jam
+    batas waktunya mungkin baru sore."""
     client = get_client()
     today = _today_str()
+    settings = get_company_settings(company_id)
+    deadline_hour = settings.get("attendance_deadline_hour", 24)
+    deadline_minute = settings.get("attendance_deadline_minute", 0)
+    now = _now_wib()
+    is_past_deadline = (now.hour, now.minute) >= (deadline_hour, deadline_minute)
 
     users_r = (
         client.table("users")
@@ -1297,7 +1453,13 @@ def get_submission_status_today(company_id: str, template_id: str) -> dict:
         else:
             belum.append(u)
 
-    return {"sudah": sudah, "belum": belum, "total": len(users_r.data)}
+    return {
+        "sudah": sudah,
+        "belum": belum,
+        "total": len(users_r.data),
+        "deadline_hour": deadline_hour,
+        "is_past_deadline": is_past_deadline,
+    }
 
 
 def get_user_submissions(user_email: str, limit: int = 50):
@@ -1325,7 +1487,7 @@ def get_user_submissions(user_email: str, limit: int = 50):
         for a in answers_r.data:
             by_submission.setdefault(a["submission_id"], []).append(a)
         for s in submissions:
-            s["answers"] = by_submission.get(s["id"], [])
+            s["answers"] = refresh_file_urls(by_submission.get(s["id"], []), key="file_url")
     return submissions
 
 
@@ -1490,10 +1652,10 @@ def run_late_submission_check(company_id: str) -> dict:
     if not template:
         return {"checked": 0, "reminded": 0, "escalated": 0, "note": "Belum ada form harian yang diatur."}
 
-    from datetime import datetime, timezone
-    now_hour = datetime.now(timezone.utc).hour
-    deadline = settings.get("attendance_deadline_hour", 24)
-    if now_hour < deadline:
+    now = _now_wib()
+    deadline_hour = settings.get("attendance_deadline_hour", 24)
+    deadline_minute = settings.get("attendance_deadline_minute", 0)
+    if (now.hour, now.minute) < (deadline_hour, deadline_minute):
         return {"checked": 0, "reminded": 0, "escalated": 0, "note": "Belum lewat batas waktu hari ini."}
 
     status = get_submission_status_today(company_id, template["id"])
@@ -1522,6 +1684,29 @@ def run_late_submission_check(company_id: str) -> dict:
                 escalated += 1
 
     return {"checked": status["total"], "reminded": reminded, "escalated": escalated}
+
+
+def list_all_company_ids() -> list:
+    """Dipakai job cron global (semua company sekaligus) -- bukan trigger
+    manual 1 company oleh Admin."""
+    client = get_client()
+    r = client.table("companies").select("id").execute()
+    return [c["id"] for c in r.data]
+
+
+def run_late_submission_check_all_companies() -> dict:
+    """Jalankan run_late_submission_check ke SEMUA company sekaligus --
+    ini yang dipanggil scheduler otomatis (Railway Cron Job), BUKAN yang
+    dipanggil tombol manual Admin (itu tetap per-company lewat
+    run_late_submission_check biasa). 1 company gagal tidak menggagalkan
+    company lain."""
+    results = {}
+    for company_id in list_all_company_ids():
+        try:
+            results[company_id] = run_late_submission_check(company_id)
+        except Exception as e:
+            results[company_id] = {"error": str(e)}
+    return results
 
 
 # ============================================================
@@ -1681,7 +1866,7 @@ def get_today_work_report(user_email: str, company_id: str):
         .order("row_order")
         .execute()
     )
-    report["rows"] = rows.data
+    report["rows"] = refresh_file_urls(rows.data, key="attachment_url")
     return report
 
 
@@ -1764,7 +1949,7 @@ def get_user_work_reports(user_email: str, limit: int = 30):
         for row in rows_r.data:
             by_report.setdefault(row["report_id"], []).append(row)
         for r in reports:
-            r["rows"] = by_report.get(r["id"], [])
+            r["rows"] = refresh_file_urls(by_report.get(r["id"], []), key="attachment_url")
     return reports
 
 

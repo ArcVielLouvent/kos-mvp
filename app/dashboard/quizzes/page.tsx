@@ -16,6 +16,9 @@ export default function QuizzesPage() {
   const isAdminTier = user?.role === "Admin" || user?.role === "SuperAdmin";
 
   const [quizzes, setQuizzes] = useState<any[]>([]);
+  const [quizzesTotal, setQuizzesTotal] = useState(0);
+  const [quizzesPage, setQuizzesPage] = useState(1);
+  const QUIZ_PAGE_SIZE = 20;
   const [myAttempts, setMyAttempts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeQuiz, setActiveQuiz] = useState<any>(null);
@@ -23,14 +26,16 @@ export default function QuizzesPage() {
   const [result, setResult] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const load = () => {
+  const load = (page = 1) => {
     setIsLoading(true);
     Promise.all([
-      apiJson("/api/quizzes"),
+      apiJson(`/api/quizzes?page=${page}&page_size=${QUIZ_PAGE_SIZE}`),
       apiJson("/api/quizzes/attempts/me"),
     ])
       .then(([quizData, attemptData]) => {
         setQuizzes(quizData.quizzes || []);
+        setQuizzesTotal(quizData.total || 0);
+        setQuizzesPage(page);
         setMyAttempts(attemptData.attempts || []);
       })
       .finally(() => setIsLoading(false));
@@ -194,6 +199,26 @@ export default function QuizzesPage() {
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {Math.ceil(quizzesTotal / QUIZ_PAGE_SIZE) > 1 && (
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => load(quizzesPage - 1)}
+                disabled={quizzesPage === 1}
+                className="rounded border border-navy-100 bg-white px-3 py-1.5 text-xs font-medium text-ink-muted disabled:opacity-40"
+              >
+                Sebelumnya
+              </button>
+              <span className="text-xs text-ink-faint">Halaman {quizzesPage} dari {Math.ceil(quizzesTotal / QUIZ_PAGE_SIZE)}</span>
+              <button
+                onClick={() => load(quizzesPage + 1)}
+                disabled={quizzesPage >= Math.ceil(quizzesTotal / QUIZ_PAGE_SIZE)}
+                className="rounded border border-navy-100 bg-white px-3 py-1.5 text-xs font-medium text-ink-muted disabled:opacity-40"
+              >
+                Selanjutnya
+              </button>
             </div>
           )}
 

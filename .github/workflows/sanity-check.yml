@@ -22,6 +22,7 @@ jobs:
           import ast
           # Memeriksa sintaks kode pada folder api dan file root utama
           ast.parse(open('api/index.py').read())
+          ast.parse(open('api/app.py').read())
           ast.parse(open('api/db.py').read())
           ast.parse(open('api/ai.py').read())
           "

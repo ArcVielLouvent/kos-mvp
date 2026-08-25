@@ -187,6 +187,9 @@ const markdownComponents = {
 export default function ChatPage() {
     const user = getStoredUser();
     const [sessions, setSessions] = useState<ChatSession[]>([]);
+    const [sessionsTotal, setSessionsTotal] = useState(0);
+    const [sessionsPage, setSessionsPage] = useState(1);
+    const SESSIONS_PAGE_SIZE = 30;
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
@@ -208,10 +211,12 @@ export default function ChatPage() {
         el.style.height = Math.min(el.scrollHeight, 200) + "px";
     }, [input]);
 
-    const loadSessions = async () => {
+    const loadSessions = async (page = 1) => {
         try {
-            const data = await apiJson("/api/chat/sessions");
-            setSessions(data.sessions || []);
+            const data = await apiJson(`/api/chat/sessions?page=${page}&page_size=${SESSIONS_PAGE_SIZE}`);
+            setSessions((prev) => (page === 1 ? data.sessions || [] : [...prev, ...(data.sessions || [])]));
+            setSessionsTotal(data.total || 0);
+            setSessionsPage(page);
         } catch {
             // diamkan -- riwayat opsional, tidak menghalangi chat baru
         }
@@ -388,6 +393,14 @@ export default function ChatPage() {
                             )}
                         </div>
                     ))}
+                    {sessions.length < sessionsTotal && (
+                        <button
+                            onClick={() => loadSessions(sessionsPage + 1)}
+                            className="w-full rounded-[var(--radius-control)] py-2 text-center text-2xs font-semibold text-navy-700 hover:bg-white/60"
+                        >
+                            Muat lebih banyak ({sessions.length}/{sessionsTotal})
+                        </button>
+                    )}
                 </div>
             </div>
 

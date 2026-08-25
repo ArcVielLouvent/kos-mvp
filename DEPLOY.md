@@ -51,18 +51,36 @@ terkirim lewat email (kalau kosong, pengumuman tetap masuk sebagai
 notifikasi dalam aplikasi, cuma email-nya nggak jalan):
 - `SMTP_HOST`, `SMTP_PORT` (default 587), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
 
-## 6. Job pengingat otomatis (belum di-otomatisasi penuh)
+## 6. Job pengingat otomatis (Railway Cron Job)
 
-Endpoint `POST /api/notifications/run-check` aman dipanggil berkali-kali
-(idempotent) dan mengecek siapa yang belum isi form hari ini setelah lewat
-jam batas waktu di Pengaturan, lalu eskalasi ke rantai atasan kalau
-`notify_atasan_enabled` aktif. Saat ini dipicu manual lewat tombol
-"Kirim pengingat sekarang" di Dashboard -- kalau mau benar-benar otomatis
-tiap beberapa jam, tambahkan Railway Cron Job yang hit endpoint ini
-(butuh service account/token khusus dulu, karena endpoint ini pakai auth
-header X-User-Email biasa -- ini bagian yang perlu didiskusikan lagi kalau
-mau full-otomatis).
+Ada 2 jalur buat pengecekan telat isi Form Kehadiran + eskalasi ke atasan:
 
+- **Manual** -- tombol "Kirim pengingat sekarang" di Dashboard, lewat
+  `POST /api/notifications/run-check`, cuma untuk company milik Admin
+  yang sedang login. Cocok untuk perusahaan kecil / testing.
+- **Otomatis (disarankan untuk perusahaan dengan banyak karyawan)** --
+  `POST /api/cron/notifications-check`, jalan ke SEMUA company sekaligus,
+  dilindungi token rahasia (`CRON_SECRET`) alih-alih sesi login Admin
+  (scheduler tidak bisa login sebagai user sungguhan).
+
+**Setup Railway Cron Job:**
+1. Isi env var `CRON_SECRET` di service backend (string acak, panjang).
+2. Di project Railway yang sama, buat service baru bertipe **Cron Job**.
+3. Atur jadwal sesuai kebutuhan, misalnya tiap 2 jam: `0 */2 * * *`
+4. Command:
+   ```
+   curl -X POST https://<domain-backend>/api/cron/notifications-check \
+     -H "X-Cron-Secret: <isi sama dengan env var CRON_SECRET>"
+   ```
+
+Endpoint ini aman dipanggil berkali-kali (idempotent) dan otomatis skip
+kalau belum lewat jam batas waktu yang diatur di Pengaturan masing-masing
+company.
+
+**Catatan soal zona waktu:** jam "Batas Waktu Lapor Harian" di Pengaturan
+diasumsikan WIB (UTC+7) -- kalau nanti ada company di luar WIB (WITA/WIT),
+ini perlu disesuaikan jadi per-company timezone, bukan hardcode WIB
+seperti sekarang (`db._now_wib()`).
 
 ## 7. Pilih provider AI: Gemini atau OpenAI
 

@@ -115,7 +115,8 @@ class QuizAttemptRequest(BaseModel):
 
 class QuizGenerateRequest(BaseModel):
     folder_path: str
-    source_document_id: str
+    source_document_ids: List[str] = []
+    source_folder_path: Optional[str] = None  # kalau diisi, ambil SEMUA dokumen di folder ini (bukan pilih manual satu-satu)
     title: str
     num_questions: int = 5
     passing_score: int = 70
@@ -182,8 +183,9 @@ def to_b64(data: bytes) -> str:
 # CHAT KOS -- SESI
 # ====================================================================
 @app.get("/api/chat/sessions")
-async def list_sessions_endpoint(user: dict = Depends(get_current_user_context)):
-    return {"sessions": db.list_chat_sessions(user["email"])}
+async def list_sessions_endpoint(page: int = 1, page_size: int = 30, user: dict = Depends(get_current_user_context)):
+    sessions, total = db.list_chat_sessions(user["email"], page=page, page_size=page_size)
+    return {"sessions": sessions, "total": total, "page": page, "pageSize": page_size}
 
 
 @app.post("/api/chat/sessions")
@@ -531,6 +533,7 @@ async def chat_endpoint(req: ChatRequest, user: dict = Depends(get_current_user_
             }
             for d in used_sources
         ]
+        sources_to_save = db.refresh_file_urls(sources_to_save)  # jaga-jaga: dokumen yang baru ketemu lewat search bisa saja file_url-nya sudah lama/kedaluwarsa
 
         db.add_chat_message(session_id, "assistant",
                             answer, sources=sources_to_save)
@@ -582,25 +585,22 @@ async def files_endpoint(
         # 1. Decode karakter %20 internet menjadi spasi asli
         path = urllib.parse.unquote(path)
 
-        # 2. Eksekusi pengaman defensif (VERSI FIX DENGAN DEBUG LOG)
+        # 2. Pengaman defensif: batasi path sesuai cakupan folder_access user
         path = normalize_folder(path)
-        
-        # LOG DEBUG: Mengintip parameter yang masuk ke server
-        print(f"[DEBUG-API] USER ROLE: {user.get('role')} | COMPANY ID: {company_id}")
-        print(f"[DEBUG-API] PATH AWAL: '{path}' | BASE PATH USER: '{base_path}'")
-
-        # Pengaman: Hanya cek startswith jika base_path user dibatasi (bukan "/")
         if base_path != "/" and not path.startswith(base_path):
-            print(f"[DEBUG-API] !PERINGATAN! Path '{path}' melanggar hak akses. Reset ke '{base_path}'")
             path = base_path
-        else:
-            print(f"[DEBUG-API] AKURAT: Path '{path}' lolos validasi hak akses.")
-
 
         # 3. Panggil kueri asli utama Anda (BLOK TOLERANSI LEMAH SUDAH DIHAPUS TOTAL)
         folders_raw = db.list_child_folders(company_id, path)
         docs, total = db.list_documents_in_folder(
             company_id, path, page=page, page_size=page_size)
+
+        # PERBAIKAN BUG "File not found" / InvalidJWT: signed URL yang
+        # tersimpan di DB kedaluwarsa seiring waktu (7-365 hari tergantung
+        # jalur upload) -- di-refresh jadi URL baru yang valid SETIAP kali
+        # daftar file ini diminta, jadi dokumen lama otomatis "sembuh"
+        # tanpa perlu migrasi data.
+        docs = db.refresh_file_urls(docs)
 
         # 4. Format data folder untuk Next.js
         folders_formatted = []
@@ -684,8 +684,14 @@ async def delete_folder_endpoint(
 ):
     require_write(user)
     try:
-        db.delete_folder_and_contents(user["company_id"], path)
-        return {"status": "success", "message": "Folder berhasil dihapus secara permanen."}
+        result = db.delete_folder_and_contents(user["company_id"], path)
+        message = "Folder berhasil dihapus secara permanen."
+        if result["affected_users"]:
+            message += (
+                f" {len(result['affected_users'])} karyawan yang aksesnya ke folder ini "
+                f"otomatis dipindahkan ke {result['reassigned_to']}."
+            )
+        return {"status": "success", "message": message, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -708,12 +714,17 @@ async def bulk_delete_endpoint(
 ):
     require_write(user)
     try:
+        all_affected_users = set()
         for fpath in req.folders:
-            db.delete_folder_and_contents(user["company_id"], fpath)
+            result = db.delete_folder_and_contents(user["company_id"], fpath)
+            all_affected_users.update(result["affected_users"])
         for did in req.docs:
             db.delete_document(did)
         total = len(req.folders) + len(req.docs)
-        return {"status": "success", "message": f"{total} item berhasil dihapus."}
+        message = f"{total} item berhasil dihapus."
+        if all_affected_users:
+            message += f" {len(all_affected_users)} karyawan yang aksesnya kena dampak otomatis dipindahkan ke folder induk."
+        return {"status": "success", "message": message}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1151,6 +1162,7 @@ class CompanySettingsUpdateRequest(BaseModel):
     poin_pelanggaran_enabled: Optional[bool] = None
     notify_atasan_enabled: Optional[bool] = None
     attendance_deadline_hour: Optional[int] = None
+    attendance_deadline_minute: Optional[int] = None
 
 
 @app.get("/api/settings/company")
@@ -1169,6 +1181,7 @@ async def update_company_settings_endpoint(
         poin_pelanggaran_enabled=req.poin_pelanggaran_enabled,
         notify_atasan_enabled=req.notify_atasan_enabled,
         attendance_deadline_hour=req.attendance_deadline_hour,
+        attendance_deadline_minute=req.attendance_deadline_minute,
     )
     return {"status": "success", "settings": updated}
 
@@ -1266,10 +1279,10 @@ async def get_my_reports_endpoint(user: dict = Depends(get_current_user_context)
 # KUIS TRAINING (KARYAWAN)
 # ====================================================================
 @app.get("/api/quizzes")
-async def list_quizzes_endpoint(user: dict = Depends(get_current_user_context)):
-    quizzes = db.list_quizzes_for_folder(
-        user["company_id"], user["folder_access"])
-    return {"quizzes": quizzes}
+async def list_quizzes_endpoint(page: int = 1, page_size: int = 20, user: dict = Depends(get_current_user_context)):
+    quizzes, total = db.list_quizzes_for_folder(
+        user["company_id"], user["folder_access"], page=page, page_size=page_size)
+    return {"quizzes": quizzes, "total": total, "page": page, "pageSize": page_size}
 
 
 @app.get("/api/quizzes/{quiz_id}")
@@ -1329,17 +1342,40 @@ async def generate_quiz_endpoint(
 ):
     require_write(user)
 
-    # Catatan: list_documents_in_folder tidak menyertakan kolom "content" (cuma preview
-    # tidak tersedia di sana), jadi kita ambil isi lengkap dokumen lewat
-    # db.get_full_document_content -- inilah fungsi yang memang dibuat khusus untuk ini.
-    content = db.get_full_document_content(req.source_document_id)
-    if not content or not content.strip():
+    # Dua cara pilih sumber: (1) pilih beberapa dokumen manual satu-satu,
+    # atau (2) pilih 1 folder -> otomatis ambil SEMUA dokumen di dalamnya
+    # (dibatasi 15 dokumen demi ukuran prompt & biaya, sama seperti fitur
+    # kompilasi di Chat KOS). Isi tiap dokumen digabung jadi 1 teks besar
+    # dengan penanda judul supaya AI tahu asalnya masing-masing.
+    scope_note = None
+    if req.source_folder_path:
+        docs, total_in_scope = db.list_documents_content_in_scope(
+            user["company_id"], req.source_folder_path, limit=15
+        )
+        if not docs:
+            raise HTTPException(status_code=400, detail=f"Tidak ada dokumen di folder {req.source_folder_path}.")
+        if total_in_scope > len(docs):
+            scope_note = f"Folder ini berisi {total_in_scope} dokumen, baru {len(docs)} yang dipakai (dibatasi demi kecepatan)."
+        source_ids_for_quiz = [d["id"] for d in docs]
+    elif req.source_document_ids:
+        docs = [db.get_document_by_id(did) for did in req.source_document_ids]
+        docs = [d for d in docs if d]  # buang yang null (id salah/dokumen sudah dihapus)
+        if not docs:
+            raise HTTPException(status_code=400, detail="Dokumen sumber tidak ditemukan.")
+        source_ids_for_quiz = [d["id"] for d in docs]
+    else:
+        raise HTTPException(status_code=400, detail="Pilih minimal 1 dokumen atau 1 folder sebagai sumber.")
+
+    combined_content = "\n\n---\n\n".join(
+        f"[Dokumen: {d['title']}]\n{(d.get('content') or '')[:6000]}" for d in docs
+    )
+    if not combined_content.strip():
         raise HTTPException(
-            status_code=400, detail="Dokumen ini tidak punya cukup teks untuk dibuatkan soal."
+            status_code=400, detail="Dokumen yang dipilih tidak punya cukup teks untuk dibuatkan soal."
         )
 
     try:
-        questions = ai.generate_quiz_questions(content, req.num_questions)
+        questions = ai.generate_quiz_questions(combined_content, req.num_questions)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Gagal generate soal: {str(e)}")
@@ -1350,10 +1386,10 @@ async def generate_quiz_endpoint(
 
     quiz_id = db.create_quiz(
         user["company_id"], req.folder_path, req.title or "Kuis",
-        questions, source_document_id=req.source_document_id,
+        questions, source_document_id=source_ids_for_quiz[0] if len(source_ids_for_quiz) == 1 else None,
         passing_score=req.passing_score,
     )
-    return {"status": "success", "quiz_id": quiz_id, "questions": questions}
+    return {"status": "success", "quiz_id": quiz_id, "questions": questions, "scopeNote": scope_note}
 
 
 class PasswordChangeRequest(BaseModel):
@@ -1402,14 +1438,15 @@ async def dashboard_endpoint(user: dict = Depends(get_current_user_context)):
         folder_breakdown = []
         inbox = {"path": "/Kotak Masuk/", "count": 0}
         for fpath in root_folders:
-            _, fdoc_count = db.list_documents_in_folder(company_id, fpath, page=1, page_size=1)
+            tree_stats = db.get_folder_tree_stats(company_id, fpath)
             if fpath.strip("/").lower() == "kotak masuk":
-                inbox["count"] = fdoc_count
+                inbox["count"] = tree_stats["doc_count"]
                 continue  # jangan dobel -- Kotak Masuk ditampilkan terpisah di dashboard, bukan ikut grid folder biasa
             folder_breakdown.append({
                 "path": fpath,
                 "name": fpath.rstrip("/").split("/")[-1],
-                "count": fdoc_count,
+                "count": tree_stats["doc_count"],
+                "subfolderCount": tree_stats["subfolder_count"],
             })
 
         recent = db.get_recent_activity(company_id, limit=8)
@@ -1533,6 +1570,7 @@ async def submit_daily_form_endpoint(
     submission = db.submit_daily_form(
         template["id"], user["email"], user["company_id"], answers,
         deadline_hour=settings.get("attendance_deadline_hour", 24),
+        deadline_minute=settings.get("attendance_deadline_minute", 0),
     )
     return {"status": "success", "message": "Form terkirim.", "submission": submission}
 
@@ -1623,14 +1661,39 @@ async def mark_all_notifications_read_endpoint(user: dict = Depends(get_current_
 
 @app.post("/api/notifications/run-check")
 async def run_notification_check_endpoint(user: dict = Depends(get_current_user_context)):
-    """Jalankan pengecekan telat + eskalasi sekarang juga. Dipanggil manual
-    oleh Admin/SuperAdmin dari UI, ATAU dipanggil otomatis berulang tiap
-    beberapa jam lewat Railway Cron Job / scheduler eksternal yang hit
-    endpoint ini (aman dipanggil berkali-kali, sudah idempotent)."""
+    """Trigger MANUAL dari tombol di Dashboard oleh Admin/SuperAdmin yang
+    sedang login -- untuk company mereka sendiri saja. Untuk pengecekan
+    OTOMATIS terjadwal (semua company sekaligus, tanpa perlu ada Admin
+    yang login/klik), lihat /api/cron/notifications-check di bawah."""
     if not is_admin_tier(user):
         raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
     result = db.run_late_submission_check(user["company_id"])
     return {"status": "success", **result}
+
+
+@app.post("/api/cron/notifications-check")
+async def cron_notifications_check_endpoint(x_cron_secret: str = Header(None)):
+    """Endpoint KHUSUS buat scheduler otomatis (Railway Cron Job) -- BUKAN
+    dipanggil dari UI. Dilindungi token rahasia (env var CRON_SECRET) alih-
+    alih sesi login Admin, karena scheduler tidak bisa login sebagai user
+    sungguhan. Jalankan pengecekan telat + eskalasi ke SEMUA company
+    sekaligus (bukan cuma 1 company seperti trigger manual), supaya
+    Admin/SuperAdmin tidak perlu ingat-ingat klik tombol tiap beberapa
+    jam -- penting terutama untuk perusahaan dengan banyak karyawan yang
+    tidak realistis dipantau manual satu per satu.
+
+    Setup di Railway: buat service baru "Cron Job" di project yang sama,
+    schedule sesuai kebutuhan (mis. tiap 2 jam: 0 */2 * * *), command:
+    curl -X POST https://<domain-backend>/api/cron/notifications-check
+      -H "X-Cron-Secret: <isi sama dengan env var CRON_SECRET>"
+    """
+    expected_secret = os.environ.get("CRON_SECRET")
+    if not expected_secret:
+        raise HTTPException(status_code=503, detail="CRON_SECRET belum diatur di server -- endpoint ini sengaja dinonaktifkan sampai diisi.")
+    if x_cron_secret != expected_secret:
+        raise HTTPException(status_code=401, detail="Token cron tidak valid.")
+    results = db.run_late_submission_check_all_companies()
+    return {"status": "success", "companies_checked": len(results), "results": results}
 
 
 # ====================================================================

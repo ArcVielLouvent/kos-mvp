@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { TopBar } from "@/components/TopBar";
 import { FileManagerBody } from "@/components/FileManagerBody";
 import { EmployeeDirectoryBody } from "@/components/EmployeeDirectoryBody";
@@ -143,7 +144,10 @@ export default function DashboardPage() {
                                 </button>
                             </div>
 
-                            {/* Status Kehadiran hari ini -- badge, klik buat lihat siapa aja yang belum absen */}
+                            {/* Status Kehadiran hari ini -- badge, klik buat lihat siapa aja yang belum absen.
+                                Warna & gaya BEDA tergantung sudah lewat jam batas waktu atau belum -- sebelum
+                                lewat jam batas, "belum isi" itu wajar (hari belum selesai), bukan sesuatu yang
+                                perlu dikhawatirkan, jadi tidak ditampilkan seolah-olah semua orang telat. */}
                             {attendanceStatus && (
                                 <div className="rounded-[var(--radius-card)] border border-navy-100 bg-white p-4">
                                     <button
@@ -153,13 +157,26 @@ export default function DashboardPage() {
                                         <div className="flex items-center gap-2.5">
                                             <span className={cn(
                                                 "flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)]",
-                                                attendanceStatus.belum.length === 0 ? "bg-green-50 text-green-600" : "bg-amber-50 text-amber-600"
+                                                attendanceStatus.belum.length === 0
+                                                    ? "bg-green-50 text-green-600"
+                                                    : attendanceStatus.is_past_deadline
+                                                        ? "bg-amber-50 text-amber-600"
+                                                        : "bg-navy-50 text-navy-600"
                                             )}>
                                                 <CalendarCheck className="h-4 w-4" />
                                             </span>
-                                            <p className="text-sm font-medium text-ink">
-                                                Form harian: {attendanceStatus.sudah.length}/{attendanceStatus.total} sudah isi
-                                            </p>
+                                            <div>
+                                                <p className="text-sm font-medium text-ink">
+                                                    Form harian: {attendanceStatus.sudah.length}/{attendanceStatus.total} sudah isi
+                                                </p>
+                                                {attendanceStatus.belum.length > 0 && (
+                                                    <p className="text-2xs text-ink-faint">
+                                                        {attendanceStatus.is_past_deadline
+                                                            ? `Lewat batas waktu (${String(attendanceStatus.deadline_hour).padStart(2, "0")}:${String(attendanceStatus.deadline_minute ?? 0).padStart(2, "0")} WIB)`
+                                                            : `Batas waktu jam ${String(attendanceStatus.deadline_hour).padStart(2, "0")}:${String(attendanceStatus.deadline_minute ?? 0).padStart(2, "0")} WIB -- masih ada waktu`}
+                                                    </p>
+                                                )}
+                                            </div>
                                         </div>
                                         {attendanceStatus.belum.length > 0 && (
                                             <span className="text-xs font-medium text-navy-700">
@@ -169,15 +186,20 @@ export default function DashboardPage() {
                                     </button>
                                     {showBelumList && attendanceStatus.belum.length > 0 && (
                                         <div className="mt-3 space-y-1.5 border-t border-navy-50 pt-3">
-                                            {attendanceStatus.belum.map((u: any) => (
+                                            {attendanceStatus.belum.slice(0, 8).map((u: any) => (
                                                 <div key={u.email} className="flex items-center gap-2 text-xs text-ink-muted">
-                                                    <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+                                                    <AlertCircle className={cn("h-3.5 w-3.5", attendanceStatus.is_past_deadline ? "text-amber-500" : "text-ink-faint")} />
                                                     {u.position_title ? `${u.position_title} -- ` : ""}{u.email}
                                                 </div>
                                             ))}
+                                            {attendanceStatus.belum.length > 8 && (
+                                                <Link href="/dashboard/attendance/belum" className="block text-2xs font-semibold text-navy-700 hover:underline">
+                                                    +{attendanceStatus.belum.length - 8} karyawan lainnya -- lihat semua
+                                                </Link>
+                                            )}
                                             <button
                                                 onClick={() => apiJson("/api/notifications/run-check", { method: "POST" }).then(() => window.dispatchEvent(new Event(NOTIF_REFRESH_EVENT))).catch(() => {})}
-                                                className="mt-1 text-2xs font-semibold text-navy-700 hover:underline"
+                                                className="mt-1 block text-2xs font-semibold text-navy-700 hover:underline"
                                             >
                                                 Kirim pengingat sekarang
                                             </button>
@@ -230,6 +252,9 @@ export default function DashboardPage() {
                                                 <div>
                                                     <p className="font-mono-data text-xl font-semibold">{f.count}</p>
                                                     <p className="truncate text-xs opacity-90">{f.name}</p>
+                                                    <p className="text-2xs opacity-70">
+                                                        dokumen{f.subfolderCount > 0 ? ` -- ${f.subfolderCount} subfolder` : ""}
+                                                    </p>
                                                 </div>
                                             </button>
                                         ))}

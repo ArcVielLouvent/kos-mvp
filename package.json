@@ -12,7 +12,6 @@
     "postcss": "^8.5.26",
     "react": "latest",
     "react-dom": "latest",
-    "react-is": "^19.2.8",
     "react-markdown": "^10.1.0",
     "recharts": "^3.10.0",
     "remark-gfm": "^4.0.1",

@@ -344,21 +344,25 @@ def create_folder(company_id: str, path: str):
 def delete_folder_and_contents(company_id: str, folder_path: str) -> dict:
     """Hapus folder + seluruh isinya (dokumen & subfolder) secara rekursif.
 
-    PERBAIKAN: sebelumnya kalau ada karyawan yang folder_access-nya persis
-    folder ini (atau di bawahnya), akses mereka jadi "yatim" -- masih
-    tersimpan sebagai path yang sudah tidak ada, tapi tidak ada peringatan
-    apa pun, Chat KOS/File Manager mereka diam-diam jadi kosong tanpa
-    penjelasan. Sekarang karyawan yang kena dampak OTOMATIS dipindahkan ke
-    folder INDUK (1 tingkat di atas folder yang dihapus, atau root "/"
-    kalau yang dihapus itu folder root) supaya tidak pernah benar-benar
-    terkunci tanpa akses. Return jumlah karyawan yang terdampak supaya
-    Admin diberi tahu di UI."""
+    SOAL KARYAWAN YANG AKSESNYA KE FOLDER INI: percobaan pertama saya
+    auto-pindahkan mereka ke folder INDUK -- tapi itu ternyata keliru,
+    karena folder induk SELALU lebih luas cakupannya daripada folder yang
+    dihapus (dan kalau yang dihapus itu folder ROOT, induknya jadi "/" --
+    akses PENUH ke SELURUH perusahaan). Auto-pindah seperti itu berarti
+    menaikkan hak akses karyawan secara diam-diam tanpa persetujuan
+    eksplisit Admin, yang justru lebih berbahaya daripada sekadar akses
+    yang jadi kosong.
+
+    Jadi SEKARANG: folder_access karyawan yang terdampak TIDAK diubah
+    sama sekali (tetap menunjuk ke path yang sudah tidak ada -- secara
+    de facto mereka jadi tidak lihat apa-apa di folder itu, TAPI tidak
+    ada eskalasi izin yang tidak disengaja). Fungsi ini cuma MENDETEKSI
+    dan MELAPORKAN siapa saja yang terdampak, supaya Admin sadar dan bisa
+    assign ulang secara manual & sengaja lewat halaman Manajemen Tim.
+    Daftar karyawan juga menandai folder yang sudah tidak ada (lihat
+    list_all_folder_paths + endpoint /api/team/users)."""
     client = get_client()
     folder_path = normalize_folder(folder_path)
-
-    # Folder induk = 1 tingkat di atas -- kalau folder_path = "/A/B/", induknya "/A/"
-    segments = [s for s in folder_path.split("/") if s]
-    parent_path = normalize_folder("/" + "/".join(segments[:-1])) if len(segments) > 1 else "/"
 
     affected_r = (
         client.table("users")
@@ -368,10 +372,6 @@ def delete_folder_and_contents(company_id: str, folder_path: str) -> dict:
         .execute()
     )
     affected_emails = [u["email"] for u in affected_r.data]
-    if affected_emails:
-        client.table("users").update({"folder_access": parent_path}).eq(
-            "company_id", company_id
-        ).ilike("folder_access", f"{folder_path}%").execute()
 
     client.table("documents").delete().eq("company_id", company_id).ilike(
         "folder_path", f"{folder_path}%"
@@ -380,7 +380,25 @@ def delete_folder_and_contents(company_id: str, folder_path: str) -> dict:
         "path", f"{folder_path}%"
     ).execute()
 
-    return {"affected_users": affected_emails, "reassigned_to": parent_path}
+    return {"affected_users": affected_emails}
+
+
+def list_all_folder_paths(company_id: str) -> set:
+    """Semua path folder yang BENAR-BENAR masih ada -- gabungan dari tabel
+    folders (folder eksplisit, termasuk yang kosong) + folder_path yang
+    kepakai dokumen (folder implisit). Dipakai buat nandain di Manajemen
+    Tim kalau folder_access seorang karyawan sudah tidak ada lagi (mis.
+    foldernya sudah dihapus admin lain, atau typo)."""
+    client = get_client()
+    paths = {"/"}
+    folders_r = client.table("folders").select("path").eq("company_id", company_id).execute()
+    for f in folders_r.data:
+        paths.add(f["path"])
+    docs_r = client.table("documents").select("folder_path").eq("company_id", company_id).execute()
+    for d in docs_r.data:
+        if d.get("folder_path"):
+            paths.add(d["folder_path"])
+    return paths
 
 
 def list_child_folders(company_id: str, parent_path: str) -> list:
@@ -1017,6 +1035,68 @@ def get_document_by_id(doc_id: str):
     return r.data[0] if r.data else None
 
 
+def combine_structured_datasets(company_id: str, doc_ids: list = None, folder_path: str = None) -> dict:
+    """Gabungkan BEBERAPA dataset XLSX jadi 1 tabel buat divisualisasikan
+    bareng di Insight & Grafik -- entah dipilih manual (doc_ids) atau
+    ambil semua isi 1 folder (folder_path).
+
+    PENTING: penggabungan ini MEKANIS (nyambung baris, tanpa AI) dan
+    CUMA berhasil kalau semua file yang dipilih punya struktur kolom yang
+    SAMA PERSIS (mis. beberapa laporan bulanan dengan kolom identik).
+    Kalau strukturnya beda-beda (mis. katalog KPI per departemen yang
+    kolomnya beda-beda), fungsi ini SENGAJA menolak dengan pesan jelas --
+    BUKAN maksa gabung jadi tabel yang tidak masuk akal. Untuk kasus itu,
+    arahkan user ke fitur 'kompilasi data' di Chat KOS yang memang pakai
+    AI buat ekstraksi lintas dokumen dengan struktur berbeda."""
+    if folder_path:
+        docs = list_structured_documents(company_id, folder_path)
+    else:
+        docs = [get_document_by_id(did) for did in (doc_ids or [])]
+        docs = [d for d in docs if d and d.get("structured_data")]
+
+    if not docs:
+        raise ValueError("Tidak ada dataset terstruktur yang cocok di pilihan ini.")
+
+    per_file = []  # (title, columns_set, rows)
+    for doc in docs:
+        sheets = doc.get("structured_data") or []
+        if not sheets or not sheets[0].get("rows"):
+            continue
+        rows = sheets[0]["rows"]
+        columns = list(rows[0].keys())
+        per_file.append((doc["title"], columns, rows))
+
+    if not per_file:
+        raise ValueError("Dataset yang dipilih tidak punya baris data.")
+
+    if len(per_file) == 1:
+        title, columns, rows = per_file[0]
+        return {"columns": columns, "rows": rows, "sources": [title], "merged": False}
+
+    first_columns = set(per_file[0][1])
+    mismatched = [title for title, cols, _ in per_file if set(cols) != first_columns]
+    if mismatched:
+        raise ValueError(
+            f"Kolom di file-file ini TIDAK seragam (beda struktur), jadi tidak bisa digabung otomatis "
+            f"jadi 1 tabel/chart. File yang strukturnya beda: {', '.join(mismatched[:3])}"
+            f"{', dst' if len(mismatched) > 3 else ''}. "
+            f"Kalau tetap mau menyatukan data dari file-file berbeda struktur, coba fitur "
+            f"'kompilasi data' di Chat KOS (AI yang ekstraksi field-nya, bukan penggabungan mekanis)."
+        )
+
+    columns = per_file[0][1]
+    merged_rows = []
+    for title, _, rows in per_file:
+        for r in rows:
+            merged_rows.append({**r, "_sumber_file": title})
+    return {
+        "columns": columns + ["_sumber_file"],
+        "rows": merged_rows,
+        "sources": [title for title, _, _ in per_file],
+        "merged": True,
+    }
+
+
 def list_documents_content_in_scope(company_id: str, folder_prefix: str = "/", limit: int = 25):
     """Ambil dokumen (id+title+content, TANPA structured_data) dalam cakupan
     folder tertentu -- dipakai fitur kompilasi lintas-dokumen di Chat KOS
@@ -1091,7 +1171,55 @@ def upload_company_template(company_id: str, file_bytes: bytes, filename: str) -
     return url
 
 
-def fetch_file_bytes(url: str) -> bytes:
+def reprocess_missing_structured_data(company_id: str) -> dict:
+    """Proses ulang dokumen .xlsx yang SUDAH terupload tapi structured_data-nya
+    kosong (gagal diekstrak dulu, mis. karena bug parsing lama, atau file
+    dengan baris judul di atas tabel) -- supaya dokumen lama ikut muncul di
+    Insight & Grafik tanpa perlu upload ulang manual satu-satu. Dipanggil
+    dari tombol 'Proses Ulang Dataset Lama' di halaman Insight."""
+    try:
+        from . import ai
+    except ImportError:
+        import ai
+    import tempfile
+    import os as _os
+
+    client = get_client()
+    r = (
+        client.table("documents")
+        .select("id, title, file_url")
+        .eq("company_id", company_id)
+        .ilike("title", "%.xlsx")
+        .is_("structured_data", "null")
+        .execute()
+    )
+    candidates = r.data
+    fixed, still_failed = [], []
+
+    for doc in candidates:
+        if not doc.get("file_url"):
+            still_failed.append(f"{doc['title']}: tidak ada file_url tersimpan")
+            continue
+        try:
+            fresh_url = get_fresh_file_url(doc["file_url"])
+            file_bytes = fetch_file_bytes(fresh_url)
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+                tmp.write(file_bytes)
+                tmp_path = tmp.name
+            try:
+                structured = ai.extract_xlsx_structured(tmp_path)
+            finally:
+                _os.unlink(tmp_path)
+
+            if structured:
+                client.table("documents").update({"structured_data": structured}).eq("id", doc["id"]).execute()
+                fixed.append(doc["title"])
+            else:
+                still_failed.append(f"{doc['title']}: tetap tidak ada tabel yang bisa dikenali (mungkin bukan data tabular, misalnya isinya narasi/katalog teks)")
+        except Exception as e:
+            still_failed.append(f"{doc['title']}: {str(e)}")
+
+    return {"checked": len(candidates), "fixed": fixed, "still_failed": still_failed}
     """Ambil isi file dari URL (Supabase signed URL) sebagai bytes -- dipakai untuk baca logo/template kembali."""
     import requests
 
@@ -1659,31 +1787,42 @@ def run_late_submission_check(company_id: str) -> dict:
         return {"checked": 0, "reminded": 0, "escalated": 0, "note": "Belum lewat batas waktu hari ini."}
 
     status = get_submission_status_today(company_id, template["id"])
-    reminded, escalated = 0, 0
+    reminded, escalated, errors = 0, 0, []
 
     for u in status["belum"]:
         email = u["email"]
         nama = u.get("position_title") or email
 
-        create_notification(
-            company_id, email, "reminder",
-            title="Belum isi Form Kehadiran/Lapor Kerjaan hari ini",
-            message=f"Kamu belum mengisi form harian hari ini. Segera isi ya, {nama}.",
-            related_user_email=email,
-        )
-        reminded += 1
+        # PERBAIKAN BUG: sebelumnya loop ini tanpa try/except -- kalau 1
+        # user gagal diproses (mis. create_notification error karena data
+        # aneh), SELURUH fungsi crash dan tidak ada satupun reminder yang
+        # terkirim, padahal 4 user lain seharusnya tetap bisa. Sekarang 1
+        # user gagal cuma dicatat di errors, user lain tetap diproses.
+        try:
+            create_notification(
+                company_id, email, "reminder",
+                title="Belum isi Form Kehadiran/Lapor Kerjaan hari ini",
+                message=f"Kamu belum mengisi form harian hari ini. Segera isi ya, {nama}.",
+                related_user_email=email,
+            )
+            reminded += 1
 
-        if settings.get("notify_atasan_enabled"):
-            for manager_email in get_manager_chain(email):
-                create_notification(
-                    company_id, manager_email, "escalation",
-                    title="Bawahan belum isi form harian",
-                    message=f"{email} belum mengisi Form Kehadiran/Lapor Kerjaan hari ini.",
-                    related_user_email=email,
-                )
-                escalated += 1
+            if settings.get("notify_atasan_enabled"):
+                for manager_email in get_manager_chain(email):
+                    create_notification(
+                        company_id, manager_email, "escalation",
+                        title="Bawahan belum isi form harian",
+                        message=f"{email} belum mengisi Form Kehadiran/Lapor Kerjaan hari ini.",
+                        related_user_email=email,
+                    )
+                    escalated += 1
+        except Exception as e:
+            errors.append(f"{email}: {str(e)}")
 
-    return {"checked": status["total"], "reminded": reminded, "escalated": escalated}
+    result = {"checked": status["total"], "reminded": reminded, "escalated": escalated}
+    if errors:
+        result["errors"] = errors
+    return result
 
 
 def list_all_company_ids() -> list:

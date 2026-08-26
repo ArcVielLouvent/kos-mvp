@@ -326,6 +326,25 @@ def embed_text(text: str) -> list:
     raise last_error
 
 
+def embed_chunks_parallel(chunks: list, max_workers: int = 4) -> list:
+    """PERBAIKAN BUG: fungsi ini sebelumnya CUMA ada di ai_openai.py, tidak
+    ada di sini -- padahal index.py memanggil ai.embed_chunks_parallel(...)
+    tanpa peduli provider mana yang aktif. Kalau AI_PROVIDER=gemini (yang
+    ternyata default/aktif di produksi), pemanggilan itu gagal total
+    dengan AttributeError 'module api.ai has no attribute embed_chunks_parallel'
+    -- persis bug yang bikin SEMUA upload dokumen gagal (bukan cuma xlsx,
+    semua jenis dokumen yang lewat jalur upload dengan embedding chunk)."""
+    results = [None] * len(chunks)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {
+            executor.submit(embed_text, chunk): i for i, chunk in enumerate(chunks)
+        }
+        for future in as_completed(future_to_index):
+            i = future_to_index[future]
+            results[i] = future.result()
+    return results
+
+
 def generate_answer(question: str, context_documents: list) -> str:
     client = get_client()
     context_parts = []
@@ -494,7 +513,14 @@ def extract_xlsx_text(file_path: str) -> list:
 def extract_xlsx_structured(file_path: str) -> list:
     """
     Kembalikan data XLSX dalam bentuk terstruktur untuk kebutuhan analisis
-    (bukan cuma teks). Baris pertama tiap sheet dianggap header/nama kolom.
+    (bukan cuma teks). BEDA dengan versi sebelumnya: baris kosong di ATAS
+    tabel (mis. judul/logo/baris kosong sebelum tabel sungguhan dimulai)
+    di-skip dulu -- versi lama blak-blakan asumsi baris pertama SELALU
+    header, jadi file dengan 1-2 baris judul di atas tabel (pola umum di
+    spreadsheet buatan manusia, mis. "Kamus KPI ...xlsx") gagal total
+    kedeteksi sebagai data (baris judul dianggap header, isinya jadi
+    berantakan atau malah sheet-nya ke-skip semua -> tidak muncul di
+    Insight & Grafik sama sekali, tanpa penjelasan kenapa).
     Format: [{"sheet": "nama", "rows": [{"kolom1": val, ...}, ...]}, ...]
     """
     import openpyxl
@@ -504,6 +530,14 @@ def extract_xlsx_structured(file_path: str) -> list:
 
     for sheet in wb.worksheets:
         all_rows = list(sheet.iter_rows(values_only=True))
+
+        # Lewati baris yang SEMUA selnya kosong di paling atas (baris
+        # judul/spacer sebelum tabel sungguhan dimulai).
+        start = 0
+        while start < len(all_rows) and all(c is None for c in all_rows[start]):
+            start += 1
+        all_rows = all_rows[start:]
+
         if len(all_rows) < 2:
             continue
         header = [

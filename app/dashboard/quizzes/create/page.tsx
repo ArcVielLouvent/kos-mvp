@@ -119,10 +119,19 @@ export default function CreateQuizPage() {
           </div>
 
           <div className="rounded-[var(--radius-control)] bg-navy-50/60 p-3">
-            <p className="flex items-start gap-2 text-2xs text-ink-muted">
+            <div className="flex items-start gap-2 text-2xs text-ink-muted">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-navy-700" />
-              Kotak folder di langkah 1 dan 2 memang terlihat mirip -- yang atas untuk <b>memilih bahan soal</b>, yang bawah untuk <b>menentukan siapa yang boleh mengerjakan</b> kuisnya nanti. Dua hal yang berbeda.
-            </p>
+              {/* PERBAIKAN BUG: sebelumnya <p> ini sendiri yang diberi
+                  class flex, jadi tiap text-node & <b> di dalamnya jadi
+                  flex-item TERPISAH (tersusun jadi kolom-kolom aneh,
+                  bukan teks mengalir biasa). Sekarang flex cuma di
+                  wrapper luar (ikon vs teks), isi teksnya sendiri
+                  dibungkus 1 <span> supaya <b> di dalamnya mengalir
+                  normal kiri-ke-kanan seperti teks biasa. */}
+              <span>
+                Kotak folder di langkah 1 dan 2 memang terlihat mirip -- yang atas untuk <b>memilih bahan soal</b>, yang bawah untuk <b>menentukan siapa yang boleh mengerjakan</b> kuisnya nanti. Dua hal yang berbeda.
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

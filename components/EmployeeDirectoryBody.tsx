@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import {
   Mail, Briefcase, Shield, FolderOpen, MessageSquare, ArrowLeft,
-  Search, FileText, Award, CheckCircle2, XCircle, Pencil, Check, X, Phone, IdCard, Users,
+  Search, FileText, Award, CheckCircle2, XCircle, Pencil, Check, X, Phone, IdCard, Users, AlertTriangle,
 } from "lucide-react";
 import { apiJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -208,7 +208,12 @@ export function EmployeeDirectoryBody() {
               </div>
               <div>
                 <p className="text-2xs text-ink-faint">Folder Akses</p>
-                <p className="font-mono-data text-2xs text-ink">{selectedUser.folder_access}</p>
+                <p className={cn("font-mono-data text-2xs", selectedUser.folder_exists === false ? "font-semibold text-amber-600" : "text-ink")}>
+                  {selectedUser.folder_access}
+                  {selectedUser.folder_exists === false && (
+                    <span className="ml-1.5 font-sans text-2xs">(folder ini sudah dihapus -- atur ulang akses karyawan ini)</span>
+                  )}
+                </p>
               </div>
               <div>
                 <p className="text-2xs text-ink-faint">Atasan Langsung</p>
@@ -443,8 +448,13 @@ export function EmployeeDirectoryBody() {
       <span className="flex items-center gap-1.5 text-xs text-ink-muted">
         <Shield className="h-3 w-3" /> {u.role}
       </span>
-      <span className="flex items-center gap-1.5 font-mono-data text-2xs text-ink-faint">
-        <FolderOpen className="h-3 w-3" /> {u.folder_access}
+      <span className={cn(
+        "flex items-center gap-1.5 font-mono-data text-2xs",
+        u.folder_exists === false ? "font-semibold text-amber-600" : "text-ink-faint"
+      )}>
+        {u.folder_exists === false ? <AlertTriangle className="h-3 w-3 shrink-0" /> : <FolderOpen className="h-3 w-3 shrink-0" />}
+        <span className="truncate">{u.folder_access}</span>
+        {u.folder_exists === false && <span className="shrink-0 font-sans">(folder tidak ditemukan)</span>}
       </span>
     </button>
   );

@@ -38,11 +38,38 @@ export default function DashboardPage() {
     const [attendanceStatus, setAttendanceStatus] = useState<any>(null);
     const [showBelumList, setShowBelumList] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const [isSendingReminder, setIsSendingReminder] = useState(false);
+    const [reminderResult, setReminderResult] = useState<string | null>(null);
 
-    useEffect(() => {
+    const loadAttendanceStatus = () => {
         apiJson("/api/dashboard/submission-status")
             .then(setAttendanceStatus)
             .catch(() => setAttendanceStatus(null));
+    };
+
+    const sendReminderNow = async () => {
+        setIsSendingReminder(true);
+        setReminderResult(null);
+        try {
+            const result = await apiJson("/api/notifications/run-check", { method: "POST" });
+            window.dispatchEvent(new Event(NOTIF_REFRESH_EVENT));
+            if (result.note) {
+                setReminderResult(result.note); // mis. "belum lewat batas waktu" -- bukan error, tapi perlu kelihatan
+            } else {
+                let msg = `Terkirim ke ${result.reminded} karyawan`;
+                if (result.escalated) msg += `, eskalasi ke ${result.escalated} atasan`;
+                if (result.errors?.length) msg += ` (${result.errors.length} gagal, lihat detail di /dashboard/attendance/belum)`;
+                setReminderResult(msg);
+            }
+        } catch (e: any) {
+            setReminderResult(e.message || "Gagal mengirim pengingat -- coba lagi atau cek koneksi.");
+        } finally {
+            setIsSendingReminder(false);
+        }
+    };
+
+    useEffect(() => {
+        loadAttendanceStatus();
     }, []);
 
     useEffect(() => {
@@ -198,11 +225,15 @@ export default function DashboardPage() {
                                                 </Link>
                                             )}
                                             <button
-                                                onClick={() => apiJson("/api/notifications/run-check", { method: "POST" }).then(() => window.dispatchEvent(new Event(NOTIF_REFRESH_EVENT))).catch(() => {})}
-                                                className="mt-1 block text-2xs font-semibold text-navy-700 hover:underline"
+                                                onClick={sendReminderNow}
+                                                disabled={isSendingReminder}
+                                                className="mt-1 flex items-center gap-1.5 text-2xs font-semibold text-navy-700 hover:underline disabled:opacity-50"
                                             >
-                                                Kirim pengingat sekarang
+                                                {isSendingReminder ? "Mengirim..." : "Kirim pengingat sekarang"}
                                             </button>
+                                            {reminderResult && (
+                                                <p className="rounded bg-navy-50 px-2 py-1.5 text-2xs font-medium text-navy-900">{reminderResult}</p>
+                                            )}
                                         </div>
                                     )}
                                 </div>

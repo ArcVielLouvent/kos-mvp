@@ -688,8 +688,10 @@ async def delete_folder_endpoint(
         message = "Folder berhasil dihapus secara permanen."
         if result["affected_users"]:
             message += (
-                f" {len(result['affected_users'])} karyawan yang aksesnya ke folder ini "
-                f"otomatis dipindahkan ke {result['reassigned_to']}."
+                f" PERHATIAN: {len(result['affected_users'])} karyawan folder aksesnya "
+                f"ke folder ini ({', '.join(result['affected_users'][:5])}"
+                f"{', dst' if len(result['affected_users']) > 5 else ''}) -- "
+                f"akses mereka TIDAK diubah otomatis, silakan atur ulang manual di Manajemen Tim."
             )
         return {"status": "success", "message": message, **result}
     except Exception as e:
@@ -723,7 +725,7 @@ async def bulk_delete_endpoint(
         total = len(req.folders) + len(req.docs)
         message = f"{total} item berhasil dihapus."
         if all_affected_users:
-            message += f" {len(all_affected_users)} karyawan yang aksesnya kena dampak otomatis dipindahkan ke folder induk."
+            message += f" PERHATIAN: {len(all_affected_users)} karyawan aksesnya ke folder yang dihapus -- silakan atur ulang manual di Manajemen Tim."
         return {"status": "success", "message": message}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1095,6 +1097,40 @@ async def get_insight_dataset_endpoint(doc_id: str, user: dict = Depends(get_cur
     return {"title": doc["title"], "columns": list(sheet["rows"][0].keys()), "rows": sheet["rows"]}
 
 
+class CombineDatasetsRequest(BaseModel):
+    doc_ids: List[str] = []
+    folder_path: Optional[str] = None
+
+
+@app.post("/api/insights/combine")
+async def combine_datasets_endpoint(
+    req: CombineDatasetsRequest, user: dict = Depends(get_current_user_context)
+):
+    """Gabungkan beberapa dataset XLSX sekaligus (pilih manual atau
+    seluruh isi 1 folder) buat divisualisasikan bareng -- lihat
+    db.combine_structured_datasets untuk aturan kapan penggabungan
+    diperbolehkan (kolom harus seragam)."""
+    try:
+        result = db.combine_structured_datasets(
+            user["company_id"], doc_ids=req.doc_ids or None, folder_path=req.folder_path
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/insights/reprocess")
+async def reprocess_insight_datasets_endpoint(user: dict = Depends(get_current_user_context)):
+    """Proses ulang dokumen .xlsx yang sudah terupload tapi belum berhasil
+    diekstrak jadi dataset (mis. gagal karena baris judul di atas tabel,
+    bug yang sudah diperbaiki di extract_xlsx_structured) -- supaya
+    dokumen lama ikut muncul di Insight & Grafik tanpa perlu upload ulang."""
+    if not is_admin_tier(user):
+        raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
+    result = db.reprocess_missing_structured_data(user["company_id"])
+    return {"status": "success", **result}
+
+
 @app.get("/api/team/branding")
 async def get_branding_endpoint(user: dict = Depends(get_current_user_context)):
     return db.get_company_branding(user["company_id"])
@@ -1128,6 +1164,13 @@ async def upload_template_endpoint(
 async def list_users_endpoint(user: dict = Depends(get_current_user_context)):
     users_list = db.list_managed_users(
         user["company_id"], user["folder_access"], user["role"])
+    # Supaya frontend bisa tandai karyawan yang folder_access-nya sudah
+    # tidak ada lagi (mis. foldernya sudah dihapus) -- lihat
+    # db.delete_folder_and_contents, akses TIDAK di-auto-reassign demi
+    # menghindari eskalasi izin diam-diam, jadi perlu ditandai di sini.
+    valid_folders = db.list_all_folder_paths(user["company_id"])
+    for u in users_list:
+        u["folder_exists"] = u.get("folder_access") in valid_folders
     return {"users": users_list}
 
 

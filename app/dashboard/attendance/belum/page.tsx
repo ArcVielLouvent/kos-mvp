@@ -49,7 +49,13 @@ export default function BelumIsiKehadiranPage() {
     try {
       const result = await apiJson("/api/notifications/run-check", { method: "POST" });
       window.dispatchEvent(new Event(NOTIF_REFRESH_EVENT));
-      setSentMsg(`Pengingat terkirim ke ${result.reminded} karyawan${result.escalated ? `, eskalasi ke ${result.escalated} atasan` : ""}.`);
+      if (result.note) {
+        setSentMsg(result.note); // mis. "belum lewat batas waktu hari ini"
+      } else {
+        let msg = `Pengingat terkirim ke ${result.reminded} karyawan${result.escalated ? `, eskalasi ke ${result.escalated} atasan` : ""}.`;
+        if (result.errors?.length) msg += ` ${result.errors.length} gagal: ${result.errors.slice(0, 3).join("; ")}`;
+        setSentMsg(msg);
+      }
     } catch (e: any) {
       setSentMsg(e.message || "Gagal mengirim pengingat.");
     } finally {

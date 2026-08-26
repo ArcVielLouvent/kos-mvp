@@ -419,11 +419,18 @@ def extract_xlsx_text(file_path: str) -> list:
 
 
 def extract_xlsx_structured(file_path: str) -> list:
+    """Lewati baris kosong di atas tabel dulu (baris judul/spacer) sebelum
+    menganggap baris pertama sebagai header -- lihat komentar lengkap di
+    ai_gemini.py versi fungsi ini."""
     import openpyxl
     wb = openpyxl.load_workbook(file_path, data_only=True)
     result = []
     for sheet in wb.worksheets:
         all_rows = list(sheet.iter_rows(values_only=True))
+        start = 0
+        while start < len(all_rows) and all(c is None for c in all_rows[start]):
+            start += 1
+        all_rows = all_rows[start:]
         if len(all_rows) < 2:
             continue
         header = [str(h) if h is not None else f"col_{i}" for i, h in enumerate(all_rows[0])]

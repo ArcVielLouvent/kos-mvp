@@ -25,4 +25,31 @@ jobs:
           ast.parse(open('api/app.py').read())
           ast.parse(open('api/db.py').read())
           ast.parse(open('api/ai.py').read())
+          ast.parse(open('api/ai_gemini.py').read())
+          ast.parse(open('api/ai_openai.py').read())
+          "
+
+      - name: AI Provider Parity Check
+        run: |
+          python -c "
+          import re
+          # Cegah bug 'module api.ai has no attribute xxx' terulang lagi --
+          # SEMUA fungsi ai.xxx() yang dipanggil index.py WAJIB ada di KEDUA
+          # provider (ai_gemini.py & ai_openai.py), supaya ganti AI_PROVIDER
+          # tidak pernah bikin fitur yang jalan di satu provider tiba-tiba
+          # crash total di provider lain.
+          index_calls = set(re.findall(r'ai\.(\w+)\(', open('api/index.py').read()))
+          gemini_funcs = set(re.findall(r'^def (\w+)', open('api/ai_gemini.py').read(), re.MULTILINE))
+          openai_funcs = set(re.findall(r'^def (\w+)', open('api/ai_openai.py').read(), re.MULTILINE))
+
+          missing_gemini = index_calls - gemini_funcs
+          missing_openai = index_calls - openai_funcs
+
+          if missing_gemini or missing_openai:
+              if missing_gemini:
+                  print('HILANG di ai_gemini.py:', sorted(missing_gemini))
+              if missing_openai:
+                  print('HILANG di ai_openai.py:', sorted(missing_openai))
+              raise SystemExit(1)
+          print(f'OK -- {len(index_calls)} fungsi ai.xxx() semuanya ada di kedua provider.')
           "

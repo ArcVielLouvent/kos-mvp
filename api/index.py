@@ -1119,6 +1119,19 @@ async def combine_datasets_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/files/reprocess-content-types")
+async def reprocess_content_types_endpoint(user: dict = Depends(get_current_user_context)):
+    """Perbaiki content-type dokumen yang SUDAH terupload lewat jalur lama
+    (sebelum content-type ditetapkan saat upload) -- ini penyebab PDF/
+    gambar/dokumen lama dirender sebagai teks mentah di preview & gagal
+    diunduh dengan benar. Dipanggil dari tombol 'Perbaiki Tipe File Lama'
+    di File Manager."""
+    if not is_admin_tier(user):
+        raise HTTPException(status_code=403, detail="Khusus Admin/SuperAdmin.")
+    result = db.reprocess_content_types(user["company_id"])
+    return {"status": "success", **result}
+
+
 @app.post("/api/insights/reprocess")
 async def reprocess_insight_datasets_endpoint(user: dict = Depends(get_current_user_context)):
     """Proses ulang dokumen .xlsx yang sudah terupload tapi belum berhasil

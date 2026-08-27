@@ -1,4 +1,5 @@
 import os
+import mimetypes
 import secrets
 import bcrypt
 from supabase import create_client, Client
@@ -36,6 +37,18 @@ def verify_password(password: str, hashed: str) -> bool:
 # ==========================================
 # FOLDER
 # ==========================================
+def guess_content_type(filename: str) -> str:
+    """PERBAIKAN BUG: upload file ke Supabase Storage SEBELUMNYA tidak
+    pernah menetapkan content-type sama sekali -- akibatnya browser tidak
+    tahu itu PDF/gambar/dst, dan menampilkannya sebagai teks mentah (kode
+    acak) alih-alih merender filenya dengan benar, baik di preview inline
+    maupun tombol unduh (yang jadi ikut gagal karena atribut `download`
+    HTML diabaikan browser untuk URL cross-origin kalau Content-Type-nya
+    salah). Dipakai di SETIAP upload ke Supabase Storage."""
+    content_type, _ = mimetypes.guess_type(filename)
+    return content_type or "application/octet-stream"
+
+
 def normalize_folder(path: str) -> str:
     path = (path or "/").strip()
     if not path.startswith("/"):
@@ -247,7 +260,8 @@ def insert_document_with_chunks(
         storage_path = f"{company_id}/{folder_path.strip('/')}/{original_filename}"
         try:
             client.storage.from_("company-files").upload(
-                storage_path, file_bytes, {"upsert": "true"}
+                storage_path, file_bytes,
+                {"upsert": "true", "content-type": guess_content_type(original_filename)},
             )
             signed = client.storage.from_("company-files").create_signed_url(
                 storage_path,
@@ -1144,7 +1158,7 @@ def upload_company_logo(company_id: str, file_bytes: bytes, filename: str) -> st
     client = get_client()
     storage_path = f"{company_id}/branding/logo_{filename}"
     client.storage.from_("company-files").upload(
-        storage_path, file_bytes, {"upsert": "true"}
+        storage_path, file_bytes, {"upsert": "true", "content-type": guess_content_type(filename)}
     )
     signed = client.storage.from_("company-files").create_signed_url(
         storage_path, 3600 * 24 * 365
@@ -1159,7 +1173,7 @@ def upload_company_template(company_id: str, file_bytes: bytes, filename: str) -
     client = get_client()
     storage_path = f"{company_id}/branding/template_{filename}"
     client.storage.from_("company-files").upload(
-        storage_path, file_bytes, {"upsert": "true"}
+        storage_path, file_bytes, {"upsert": "true", "content-type": guess_content_type(filename)}
     )
     signed = client.storage.from_("company-files").create_signed_url(
         storage_path, 3600 * 24 * 365
@@ -1220,6 +1234,47 @@ def reprocess_missing_structured_data(company_id: str) -> dict:
             still_failed.append(f"{doc['title']}: {str(e)}")
 
     return {"checked": len(candidates), "fixed": fixed, "still_failed": still_failed}
+
+
+def reprocess_content_types(company_id: str) -> dict:
+    """Perbaiki content-type file yang SUDAH terupload lewat jalur lama
+    (sebelum guess_content_type dipasang) -- ambil ulang bytes-nya lalu
+    upload ulang ke path yang SAMA dengan content-type yang benar
+    (upsert), supaya PDF/gambar/dokumen lama yang sebelumnya dirender
+    sebagai teks mentah bisa langsung benar tanpa upload ulang manual
+    satu-satu. Dipanggil dari tombol 'Perbaiki Tipe File Lama' di File
+    Manager (Admin/SuperAdmin)."""
+    import re
+    import urllib.parse
+
+    client = get_client()
+    r = client.table("documents").select("id, title, file_url").eq("company_id", company_id).execute()
+
+    fixed, failed = [], []
+    for doc in r.data:
+        if not doc.get("file_url"):
+            continue
+        try:
+            fresh_url = get_fresh_file_url(doc["file_url"])
+            match = re.search(r"/object/sign/([^/]+)/([^?]+)", fresh_url)
+            if not match:
+                continue  # bukan signed URL Supabase (mis. link YouTube) -- lewati
+            bucket, encoded_path = match.group(1), match.group(2)
+            storage_path = urllib.parse.unquote(encoded_path)
+
+            file_bytes = fetch_file_bytes(fresh_url)
+            content_type = guess_content_type(doc["title"])
+            client.storage.from_(bucket).update(
+                storage_path, file_bytes, {"content-type": content_type, "upsert": "true"}
+            )
+            fixed.append(doc["title"])
+        except Exception as e:
+            failed.append(f"{doc['title']}: {str(e)}")
+
+    return {"checked": len(r.data), "fixed": fixed, "failed": failed}
+
+
+def fetch_file_bytes(url: str) -> bytes:
     """Ambil isi file dari URL (Supabase signed URL) sebagai bytes -- dipakai untuk baca logo/template kembali."""
     import requests
 
@@ -1237,7 +1292,7 @@ def upload_report_media(
     client = get_client()
     storage_path = f"{company_id}/reports/{user_email}/{filename}"
     client.storage.from_("company-files").upload(
-        storage_path, file_bytes, {"upsert": "true"}
+        storage_path, file_bytes, {"upsert": "true", "content-type": guess_content_type(filename)}
     )
     signed = client.storage.from_("company-files").create_signed_url(
         storage_path, 3600 * 24 * 30
@@ -1623,7 +1678,7 @@ def upload_form_file(company_id: str, user_email: str, field_id: str, file_bytes
     client = get_client()
     storage_path = f"{company_id}/form-submissions/{user_email}/{_today_str()}/{field_id}_{filename}"
     client.storage.from_("company-files").upload(
-        storage_path, file_bytes, {"upsert": "true"}
+        storage_path, file_bytes, {"upsert": "true", "content-type": guess_content_type(filename)}
     )
     signed = client.storage.from_("company-files").create_signed_url(
         storage_path, 3600 * 24 * 30
@@ -2098,7 +2153,7 @@ def upload_work_report_attachment(
     client = get_client()
     storage_path = f"{company_id}/work-reports/{user_email}/{_today_str()}/{row_key}_{filename}"
     client.storage.from_("company-files").upload(
-        storage_path, file_bytes, {"upsert": "true"}
+        storage_path, file_bytes, {"upsert": "true", "content-type": guess_content_type(filename)}
     )
     signed = client.storage.from_("company-files").create_signed_url(
         storage_path, 3600 * 24 * 30

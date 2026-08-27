@@ -43,6 +43,7 @@ export function FileManagerBody({ initialPath = "/" }: { initialPath?: string })
   const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set());
   const [previewFile, setPreviewFile] = useState<{ title: string; file_url: string } | null>(null);
   const [showMoveModal, setShowMoveModal] = useState(false);
+  const [isFixingTypes, setIsFixingTypes] = useState(false);
   const [moveDestination, setMoveDestination] = useState("/");
 
   const loadFiles = async () => {
@@ -162,6 +163,22 @@ export function FileManagerBody({ initialPath = "/" }: { initialPath?: string })
       loadFiles();
     } catch (e: any) {
       setActionMsg(e.message || "Gagal menghapus dokumen.");
+    }
+  };
+
+  const handleFixContentTypes = async () => {
+    setIsFixingTypes(true);
+    setActionMsg("");
+    try {
+      const result = await apiJson("/api/files/reprocess-content-types", { method: "POST" });
+      setActionMsg(
+        `${result.fixed?.length || 0} file diperbaiki tipe filenya (PDF/gambar/dokumen sekarang bisa dilihat & diunduh dengan benar).` +
+        (result.failed?.length ? ` ${result.failed.length} gagal diperbaiki.` : "")
+      );
+    } catch (e: any) {
+      setActionMsg(e.message || "Gagal memperbaiki tipe file.");
+    } finally {
+      setIsFixingTypes(false);
     }
   };
 
@@ -364,6 +381,16 @@ export function FileManagerBody({ initialPath = "/" }: { initialPath?: string })
         <div className="whitespace-pre-line rounded-[var(--radius-control)] border border-navy-100 bg-navy-50 px-4 py-2.5 text-xs font-medium text-navy-900">
           {actionMsg}
         </div>
+      )}
+
+      {data.writable && (
+        <button
+          onClick={handleFixContentTypes}
+          disabled={isFixingTypes}
+          className="flex items-center gap-1.5 text-2xs font-semibold text-navy-700 hover:underline disabled:opacity-50"
+        >
+          {isFixingTypes ? "Memperbaiki..." : "Perbaiki Tipe File Lama (kalau PDF/gambar dirender sebagai teks/kode)"}
+        </button>
       )}
 
       {data.writable && (data.folders.length > 0 || data.files.length > 0) && (

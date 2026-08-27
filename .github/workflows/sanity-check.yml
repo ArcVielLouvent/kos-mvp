@@ -53,3 +53,27 @@ jobs:
               raise SystemExit(1)
           print(f'OK -- {len(index_calls)} fungsi ai.xxx() semuanya ada di kedua provider.')
           "
+
+      - name: DB Function Existence Check
+        env:
+          SUPABASE_URL: "https://example.supabase.co"
+          SUPABASE_SERVICE_ROLE_KEY: "dummy"
+          GEMINI_API_KEY: "dummy"
+        run: |
+          python -c "
+          import sys, re
+          sys.path.insert(0, '.')
+          # Cegah bug 'module api.db has no attribute xxx' terulang lagi --
+          # ini kejadian nyata (fetch_file_bytes & reprocess_content_types
+          # sempat 'hilang' diam-diam gara-gara str_replace yang meleset
+          # tapi lolos dari AST syntax check karena tetap valid Python).
+          # SEMUA fungsi db.xxx() yang dipanggil index.py WAJIB benar-benar
+          # ada & bisa diimpor.
+          import api.db as db
+          index_calls = set(re.findall(r'db\.(\w+)\(', open('api/index.py').read()))
+          missing = [fn for fn in sorted(index_calls) if not hasattr(db, fn)]
+          if missing:
+              print('HILANG di db.py:', missing)
+              raise SystemExit(1)
+          print(f'OK -- {len(index_calls)} fungsi db.xxx() semuanya ada.')
+          "
